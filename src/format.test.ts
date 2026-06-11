@@ -1,12 +1,12 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
   escapeHtml,
+  formatLong,
+  markdownToTelegramHtml,
+  parseJsonSafe,
   stripAnsi,
   stripSystemTags,
-  markdownToTelegramHtml,
   wrapCode,
-  formatLong,
-  parseJsonSafe,
 } from "./format.js";
 
 // ── escapeHtml ──────────────────────────────────────────
@@ -58,7 +58,8 @@ describe("stripSystemTags", () => {
   });
 
   it("removes multiline system-reminder blocks", () => {
-    const input = "start\n<system-reminder>\nline1\nline2\n</system-reminder>\nend";
+    const input =
+      "start\n<system-reminder>\nline1\nline2\n</system-reminder>\nend";
     expect(stripSystemTags(input)).toBe("start\n\nend");
   });
 
@@ -181,7 +182,7 @@ describe("formatLong", () => {
 
   it("formatLong preserves content at chunk boundaries", () => {
     const line = "a".repeat(3500);
-    const text = line + "\nnext paragraph";
+    const text = `${line}\nnext paragraph`;
     const chunks = formatLong(text);
     expect(chunks.length).toBe(2);
   });

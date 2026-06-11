@@ -16,6 +16,9 @@
     "build": "bun build src/index.ts --outdir dist --target node --banner '#!/usr/bin/env node'",
     "typecheck": "bun x tsc --noEmit",
     "test": "bun test",
+    "lint": "biome check src/",
+    "lint:fix": "biome check --write src/",
+    "format": "biome format --write src/",
     "prepublishOnly": "bun run build"
   },
   "keywords": [
@@ -39,6 +42,7 @@
     "grammy": "^1.21.1"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
     "@types/bun": "latest",
     "@types/node": "^25.9.3",
     "typescript": "^5.9.3"

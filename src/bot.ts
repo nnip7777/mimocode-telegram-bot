@@ -1,13 +1,13 @@
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import type { Config } from "./config.js";
 import { isAllowed } from "./config.js";
-import { MimoClient } from "./mimo.js";
 import {
-  stripSystemTags,
   formatLong,
-  wrapCode,
   parseJsonSafe,
+  stripSystemTags,
+  wrapCode,
 } from "./format.js";
+import { MimoClient } from "./mimo.js";
 
 function checkAuth(ctx: { from?: { id: number } }, config: Config): boolean {
   if (!ctx.from) return false;
@@ -19,7 +19,7 @@ function sanitizeError(raw: string): string {
     .replace(/\/[\w./-]+/g, "<path>")
     .replace(/[A-Z]:\\[\w\\.-]+/gi, "<path>");
   clean = clean.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "");
-  if (clean.length > 100) clean = clean.slice(0, 100) + "...";
+  if (clean.length > 100) clean = `${clean.slice(0, 100)}...`;
   return clean || "Unknown error";
 }
 
@@ -27,27 +27,34 @@ export function createBot(config: Config) {
   const bot = new Bot(config.telegramToken);
   const mimo = new MimoClient(config);
   const processing = new Set<string>();
-  const lastSessions = new Map<string, { sessions: Array<{ id: string; title: string }>; ts: number }>();
+  const lastSessions = new Map<
+    string,
+    { sessions: Array<{ id: string; title: string }>; ts: number }
+  >();
 
   async function sendResult(chatId: string, msgId: number, content: string) {
     const cleaned = stripSystemTags(content);
     const chunks = formatLong(cleaned);
     try {
-      await bot.api.editMessageText(chatId, msgId, chunks[0], { parse_mode: "HTML" });
+      await bot.api.editMessageText(chatId, msgId, chunks[0], {
+        parse_mode: "HTML",
+      });
       for (let i = 1; i < chunks.length; i++) {
         await bot.api.sendMessage(chatId, chunks[i], { parse_mode: "HTML" });
       }
     } catch {
-      await bot.api.editMessageText(chatId, msgId, cleaned.slice(0, 4096)).catch(() => {});
+      await bot.api
+        .editMessageText(chatId, msgId, cleaned.slice(0, 4096))
+        .catch(() => {});
     }
   }
 
   async function sendLong(chatId: string, text: string) {
     const chunks = formatLong(text);
     for (const chunk of chunks) {
-      await bot.api.sendMessage(chatId, chunk, { parse_mode: "HTML" }).catch(() =>
-        bot.api.sendMessage(chatId, chunk),
-      );
+      await bot.api
+        .sendMessage(chatId, chunk, { parse_mode: "HTML" })
+        .catch(() => bot.api.sendMessage(chatId, chunk));
     }
   }
 
@@ -62,7 +69,7 @@ export function createBot(config: Config) {
     text: string,
     opts: MimoRunOpts,
   ) {
-    const chatId = String(ctx.chat!.id);
+    const chatId = String(ctx.chat?.id);
     if (processing.has(chatId)) {
       await ctx.reply("Task running. Wait or /cancel.");
       return;
@@ -73,15 +80,21 @@ export function createBot(config: Config) {
       const sent = await ctx.reply(opts.placeholder);
       const result = await mimo.sendMessage(chatId, text, opts.mimoOpts);
       if (!result.content) {
-        await bot.api.editMessageText(chatId, sent.message_id, "(empty)").catch(() => {});
+        await bot.api
+          .editMessageText(chatId, sent.message_id, "(empty)")
+          .catch(() => {});
         return;
       }
       await sendResult(chatId, sent.message_id, result.content);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`[${new Date().toISOString()}] ${opts.logPrefix} chat=${chatId} time=${elapsed}s`);
+      console.log(
+        `[${new Date().toISOString()}] ${opts.logPrefix} chat=${chatId} time=${elapsed}s`,
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      try { await ctx.reply(`Error: ${sanitizeError(msg)}`); } catch {}
+      try {
+        await ctx.reply(`Error: ${sanitizeError(msg)}`);
+      } catch {}
     } finally {
       processing.delete(chatId);
     }
@@ -158,7 +171,9 @@ export function createBot(config: Config) {
     if (oldSession) {
       const r = await mimo.exec(["session", "delete", oldSession]);
       if (r.code !== 0) {
-        await ctx.reply(`Failed to clear old session: ${sanitizeError(r.stderr)}`);
+        await ctx.reply(
+          `Failed to clear old session: ${sanitizeError(r.stderr)}`,
+        );
         return;
       }
     }
@@ -176,9 +191,9 @@ export function createBot(config: Config) {
       mimo.exec(["session", "list", "--format", "json"]),
     ]);
 
-    const sessions = parseJsonSafe<Array<{ id: string; title: string; updated: number }>>(
-      sessionList.stdout, [],
-    );
+    const sessions = parseJsonSafe<
+      Array<{ id: string; title: string; updated: number }>
+    >(sessionList.stdout, []);
 
     const currentSession = mimo.getSessionId(chatId);
     const current = sessions.find((s) => s.id === currentSession);
@@ -216,9 +231,13 @@ export function createBot(config: Config) {
     const chatId = String(ctx.chat.id);
 
     const r = await mimo.exec(["session", "list", "--format", "json"]);
-    const sessions = parseJsonSafe<Array<{
-      id: string; title: string; updated: number;
-    }>>(r.stdout, []);
+    const sessions = parseJsonSafe<
+      Array<{
+        id: string;
+        title: string;
+        updated: number;
+      }>
+    >(r.stdout, []);
 
     if (sessions.length === 0) {
       await ctx.reply("No sessions found.");
@@ -274,7 +293,10 @@ export function createBot(config: Config) {
     if (!target) {
       const current = mimo.getModel(chatId);
       const r = await mimo.exec(["models"], { timeoutMs: 10_000 });
-      const models = r.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+      const models = r.stdout
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
       const lines = [
         `<b>Model</b>: <code>${current ?? "default"}</code>\n`,
         models.map((m) => `• <code>${m}</code>`).join("\n"),
@@ -328,7 +350,11 @@ export function createBot(config: Config) {
       );
       return;
     }
-    await runMimoCommand(ctx, text, { placeholder: "⏳ Compose: plan → code → test → review...", logPrefix: "compose", mimoOpts: { agent: "compose" } });
+    await runMimoCommand(ctx, text, {
+      placeholder: "⏳ Compose: plan → code → test → review...",
+      logPrefix: "compose",
+      mimoOpts: { agent: "compose" },
+    });
   });
 
   // ── /max ────────────────────────────────────────────
@@ -339,7 +365,11 @@ export function createBot(config: Config) {
       await ctx.reply("Usage: /max &lt;complex task&gt;");
       return;
     }
-    await runMimoCommand(ctx, text, { placeholder: "⚡ Max mode...", logPrefix: "max", mimoOpts: { variant: "max" } });
+    await runMimoCommand(ctx, text, {
+      placeholder: "⚡ Max mode...",
+      logPrefix: "max",
+      mimoOpts: { variant: "max" },
+    });
   });
 
   // ── /models ──────────────────────────────────────────
@@ -347,7 +377,10 @@ export function createBot(config: Config) {
     if (!checkAuth(ctx, config)) return;
 
     const r = await mimo.exec(["models"], { timeoutMs: 10_000 });
-    const models = r.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+    const models = r.stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
 
     if (models.length === 0) {
       await ctx.reply("No models found.");
@@ -478,7 +511,10 @@ export function createBot(config: Config) {
       if (entry && num <= entry.sessions.length) {
         const target = entry.sessions[num - 1];
         mimo.setSession(chatId, target.id);
-        await ctx.reply(`Switched to session:\n<code>${target.id}</code>\n${target.title}`, { parse_mode: "HTML" });
+        await ctx.reply(
+          `Switched to session:\n<code>${target.id}</code>\n${target.title}`,
+          { parse_mode: "HTML" },
+        );
         lastSessions.delete(chatId);
         return;
       }

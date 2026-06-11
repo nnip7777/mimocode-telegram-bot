@@ -37,7 +37,9 @@ export function loadConfig(): Config {
   const runTimeoutMsRaw = process.env.MIMO_RUN_TIMEOUT_MS;
   const runTimeoutMs = runTimeoutMsRaw ? Number(runTimeoutMsRaw) : 120_000;
   if (Number.isNaN(runTimeoutMs) || runTimeoutMs <= 0) {
-    throw new Error("MIMO_RUN_TIMEOUT_MS must be a positive number (milliseconds)");
+    throw new Error(
+      "MIMO_RUN_TIMEOUT_MS must be a positive number (milliseconds)",
+    );
   }
 
   return {

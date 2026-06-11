@@ -8,14 +8,16 @@ export function escapeHtml(text: string): string {
 export function stripAnsi(text: string): string {
   return text
     .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "")
-    .replace(/\[[\?]?[0-9;]*[a-zA-Z]/g, "")
+    .replace(/\[[?]?[0-9;]*[a-zA-Z]/g, "")
     .replace(/[─-╿]/g, "")
     .replace(/[▀-▟]/g, "")
     .replace(/[■-◿]/g, "");
 }
 
 export function stripSystemTags(text: string): string {
-  return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
+  return text
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
+    .trim();
 }
 
 export function markdownToTelegramHtml(text: string): string {
@@ -40,10 +42,7 @@ export function markdownToTelegramHtml(text: string): string {
   text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
   text = text.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
   text = text.replace(/__(.+?)__/g, "<b>$1</b>");
-  text = text.replace(
-    /(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])/g,
-    "<i>$1</i>",
-  );
+  text = text.replace(/(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])/g, "<i>$1</i>");
   text = text.replace(/~~(.+?)~~/g, "<s>$1</s>");
   text = text.replace(/^[-*]\s+\[x\]\s+/gm, "✅ ");
   text = text.replace(/^[-*]\s+\[ \]\s+/gm, "⬜ ");
@@ -56,7 +55,7 @@ export function markdownToTelegramHtml(text: string): string {
   if (unclosedFence !== -1) {
     const before = text.slice(0, unclosedFence);
     const codeContent = text.slice(unclosedFence + 3).replace(/\n$/, "");
-    text = before + `<pre><code>${escapeHtml(codeContent)}</code></pre>`;
+    text = `${before}<pre><code>${escapeHtml(codeContent)}</code></pre>`;
   }
 
   for (let i = 0; i < inlineCodes.length; i++) {

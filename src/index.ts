@@ -1,7 +1,7 @@
-import { existsSync, copyFileSync } from "node:fs";
+import { copyFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { loadConfig } from "./config.js";
 import { createBot } from "./bot.js";
+import { loadConfig } from "./config.js";
 import { MimoClient } from "./mimo.js";
 
 const root = resolve(import.meta.dirname ?? process.cwd(), "..");
@@ -37,7 +37,9 @@ if (mimoOk) {
 }
 
 console.log(`  Allowed users: ${config.allowedUserIds.join(", ")}`);
-console.log(`  Skip permissions: ${config.skipPermissions ? "YES (dangerous)" : "no"}`);
+console.log(
+  `  Skip permissions: ${config.skipPermissions ? "YES (dangerous)" : "no"}`,
+);
 
 console.log("\n  Registering bot commands...");
 const cmdResult = await bot.api.setMyCommands([

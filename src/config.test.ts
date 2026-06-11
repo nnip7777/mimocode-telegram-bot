@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, afterAll } from "bun:test";
-import { isAllowed, loadConfig, env, envBool } from "./config.js";
+import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import type { Config } from "./config.js";
+import { env, envBool, isAllowed, loadConfig } from "./config.js";
 
 // ── env helper ──────────────────────────────────────────
 
