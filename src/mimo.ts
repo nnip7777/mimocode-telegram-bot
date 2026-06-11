@@ -34,6 +34,10 @@ export class MimoClient {
     this.chatAgents.delete(chatId);
   }
 
+  setSession(chatId: string, sessionId: string): void {
+    this.sessions.set(chatId, sessionId);
+  }
+
   getSessionId(chatId: string): string | undefined {
     return this.sessions.get(chatId);
   }

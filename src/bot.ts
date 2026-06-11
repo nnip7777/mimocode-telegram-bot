@@ -110,6 +110,7 @@ export function createBot(config: Config) {
   const bot = new Bot(config.telegramToken);
   const mimo = new MimoClient(config);
   const processing = new Set<string>();
+  const lastSessions = new Map<string, Array<{ id: string; title: string }>>();
 
   async function sendResult(chatId: string, msgId: number, content: string) {
     const cleaned = stripSystemTags(content);
@@ -170,7 +171,7 @@ export function createBot(config: Config) {
         `<b>Sessions</b>\n` +
         `/new — Start new session\n` +
         `/stop — Stop running task\n` +
-        `/sessions — List sessions\n` +
+        `/sessions — List sessions (reply number to switch)\n` +
         `/export — Export session as JSON\n` +
         `/delete — Delete a session\n\n` +
         `<b>Modes</b>\n` +
@@ -259,6 +260,7 @@ export function createBot(config: Config) {
   // ── /sessions ────────────────────────────────────────
   bot.command("sessions", async (ctx) => {
     if (!checkAuth(ctx, config)) return;
+    const chatId = String(ctx.chat.id);
 
     const r = await mimo.exec(["session", "list", "--format", "json"]);
     const sessions = parseJsonSafe<Array<{
@@ -270,10 +272,11 @@ export function createBot(config: Config) {
       return;
     }
 
-    const currentSession = mimo.getSessionId(String(ctx.chat.id));
+    const currentSession = mimo.getSessionId(chatId);
     const lines = [`<b>Sessions</b> (${sessions.length})\n`];
 
-    for (const s of sessions.slice(0, 15)) {
+    for (let i = 0; i < Math.min(sessions.length, 15); i++) {
+      const s = sessions[i];
       const isCurrent = s.id === currentSession;
       const marker = isCurrent ? " *" : "";
       const ago = Date.now() - s.updated;
@@ -286,8 +289,8 @@ export function createBot(config: Config) {
               ? `${Math.floor(ago / 3600000)}h`
               : `${Math.floor(ago / 86400000)}d`;
       lines.push(
-        `<code>${s.id.slice(0, 16)}</code>${marker} ${timeStr}`,
-        `  ${s.title}`,
+        `${i + 1}. <code>${s.id.slice(0, 16)}</code>${marker} ${timeStr}`,
+        `   ${s.title}`,
         ``,
       );
     }
@@ -296,7 +299,10 @@ export function createBot(config: Config) {
       lines.push(`... and ${sessions.length - 15} more`);
     }
 
-    await sendLong(String(ctx.chat.id), lines.join("\n"));
+    lines.push(`Reply a number to switch session`);
+
+    lastSessions.set(chatId, sessions.map((s) => ({ id: s.id, title: s.title })));
+    await sendLong(chatId, lines.join("\n"));
   });
 
   // ── /model ──────────────────────────────────────────
@@ -560,6 +566,18 @@ export function createBot(config: Config) {
     if (!isAllowed(userId, config)) {
       await ctx.reply("Access denied.");
       return;
+    }
+
+    const num = Number.parseInt(text, 10);
+    if (num >= 1 && text === String(num)) {
+      const sessions = lastSessions.get(chatId);
+      if (sessions && num <= sessions.length) {
+        const target = sessions[num - 1];
+        mimo.setSession(chatId, target.id);
+        await ctx.reply(`Switched to session:\n<code>${target.id}</code>\n${target.title}`, { parse_mode: "HTML" });
+        lastSessions.delete(chatId);
+        return;
+      }
     }
 
     if (processing.has(chatId)) {
