@@ -112,13 +112,13 @@ export class MimoClient {
 
   private async sessionExists(sessionId: string): Promise<boolean> {
     const r = await this.exec(["session", "list", "--format", "json"], { timeoutMs: 5000 });
-    if (r.code !== 0) return true;
+    if (r.code !== 0) return false;
 
     try {
       const sessions = JSON.parse(r.stdout) as Array<{ id?: string }>;
       return sessions.some((s) => s.id === sessionId);
     } catch {
-      return true;
+      return false;
     }
   }
 
@@ -238,7 +238,8 @@ export class MimoClient {
       return await runMimo(sessionId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (sessionId && msg.includes("Session not found")) {
+      const clean = msg.replace(/\x1b\[[0-9;]*m/g, "");
+      if (sessionId && clean.includes("Session not found")) {
         console.warn(`[mimo] session ${sessionId} not found during run; retrying with a new session`);
         this.sessions.delete(chatId);
         return runMimo();
