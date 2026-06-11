@@ -77,19 +77,33 @@ function wrapCode(text: string): string {
 }
 
 function formatLong(text: string): string[] {
-  const html = markdownToTelegramHtml(text);
-  if (html.length <= 4096) return [html];
+  const BUDGET = 3500;
+
+  if (text.length <= BUDGET) {
+    return [markdownToTelegramHtml(text)];
+  }
+
   const chunks: string[] = [];
-  let remaining = html;
+  let remaining = text;
+
   while (remaining.length > 0) {
-    let cutAt = 4096;
-    if (remaining.length > 4096) {
-      const lastNewline = remaining.lastIndexOf("\n", 4096);
-      if (lastNewline > 2048) cutAt = lastNewline;
+    if (remaining.length <= BUDGET) {
+      chunks.push(markdownToTelegramHtml(remaining));
+      break;
     }
-    chunks.push(remaining.slice(0, cutAt));
+
+    let cutAt = remaining.lastIndexOf("\n", BUDGET);
+    if (cutAt <= 0) {
+      cutAt = remaining.lastIndexOf(" ", BUDGET);
+    }
+    if (cutAt <= 0) {
+      cutAt = BUDGET;
+    }
+
+    chunks.push(markdownToTelegramHtml(remaining.slice(0, cutAt)));
     remaining = remaining.slice(cutAt);
   }
+
   return chunks;
 }
 
@@ -170,7 +184,7 @@ export function createBot(config: Config) {
         `Send any text to chat with MiMoCode\n\n` +
         `<b>Sessions</b>\n` +
         `/new — Start new session\n` +
-        `/stop — Stop running task\n` +
+        `/cancel — Stop running task\n` +
         `/sessions — List sessions (reply number to switch)\n` +
         `/export — Export session as JSON\n` +
         `/delete — Delete a session\n\n` +
@@ -381,7 +395,7 @@ export function createBot(config: Config) {
 
     try {
       const sent = await ctx.reply("⏳ Compose: plan → code → test → review...");
-      const result = await mimo.sendMessage(chatId, text, () => {}, { agent: "compose" });
+      const result = await mimo.sendMessage(chatId, text, { agent: "compose" });
 
       if (!result.content) {
         await bot.api.editMessageText(chatId, sent.message_id, "(empty)").catch(() => {});
@@ -420,7 +434,7 @@ export function createBot(config: Config) {
 
     try {
       const sent = await ctx.reply("⚡ Max mode...");
-      const result = await mimo.sendMessage(chatId, text, () => {}, { variant: "max" });
+      const result = await mimo.sendMessage(chatId, text, { variant: "max" });
 
       if (!result.content) {
         await bot.api.editMessageText(chatId, sent.message_id, "(empty)").catch(() => {});
@@ -541,16 +555,16 @@ export function createBot(config: Config) {
     }
   });
 
-  // ── /stop ──────────────────────────────────────────
-  bot.command("stop", async (ctx) => {
+  // ── /cancel, /stop ──────────────────────────────────
+  bot.command(["cancel", "stop"], async (ctx) => {
     if (!checkAuth(ctx, config)) return;
     const chatId = String(ctx.chat.id);
     if (mimo.abort(chatId)) {
       processing.delete(chatId);
-      await ctx.reply("Stopped.");
+      await ctx.reply("Task cancelled.");
     } else if (processing.has(chatId)) {
       processing.delete(chatId);
-      await ctx.reply("Stopped (process already finished).");
+      await ctx.reply("Task cancelled (process already finished).");
     } else {
       await ctx.reply("No task running.");
     }
@@ -590,7 +604,7 @@ export function createBot(config: Config) {
 
     try {
       const sent = await ctx.reply("...");
-      const result = await mimo.sendMessage(chatId, text, () => {});
+      const result = await mimo.sendMessage(chatId, text);
 
       if (!result.content) {
         await bot.api.editMessageText(chatId, sent.message_id, "(empty)").catch(() => {});

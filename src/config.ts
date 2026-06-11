@@ -6,6 +6,12 @@ function env(key: string, fallback?: string): string {
   return val;
 }
 
+function envBool(key: string, fallback: boolean): boolean {
+  const raw = process.env[key];
+  if (!raw) return fallback;
+  return raw === "true" || raw === "1";
+}
+
 export type Config = {
   readonly telegramToken: string;
   readonly allowedUserIds: readonly string[];
@@ -21,12 +27,18 @@ export function loadConfig(): Config {
     .map((s) => s.trim())
     .filter(Boolean);
 
+  if (allowedUserIds.length === 0) {
+    throw new Error(
+      "TELEGRAM_ALLOWED_USER_ID is empty. Refusing to start: an empty whitelist would let anyone drive your local agent. Set at least one Telegram numeric user ID (get yours from @userinfobot).",
+    );
+  }
+
   return {
     telegramToken: env("TELEGRAM_BOT_TOKEN"),
     allowedUserIds,
     mimoWorkDir: env("MIMO_WORK_DIR", resolve(process.cwd())),
     mimoApiUrl: process.env.MIMO_API_URL || undefined,
-    skipPermissions: process.env.MIMO_SKIP_PERMISSIONS === "true",
+    skipPermissions: envBool("MIMO_SKIP_PERMISSIONS", false),
   };
 }
 

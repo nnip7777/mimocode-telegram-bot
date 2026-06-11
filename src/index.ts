@@ -39,18 +39,15 @@ if (mimoOk) {
   console.warn("  MiMoCode CLI:  NOT FOUND (install: npm i -g @mimo-ai/cli)");
 }
 
-if (config.allowedUserIds.length > 0) {
-  console.log(`  Allowed users: ${config.allowedUserIds.join(", ")}`);
-} else {
-  console.warn("  Warning: No user whitelist — all users allowed");
-}
+console.log(`  Allowed users: ${config.allowedUserIds.join(", ")}`);
+console.log(`  Skip permissions: ${config.skipPermissions ? "YES (dangerous)" : "no"}`);
 
 console.log("\n  Registering bot commands...");
 const cmdResult = await bot.api.setMyCommands([
   { command: "start", description: "Show help & quick actions" },
   { command: "help", description: "Show all commands" },
   { command: "new", description: "Start a new session" },
-  { command: "stop", description: "Stop running task" },
+  { command: "cancel", description: "Stop running task" },
   { command: "status", description: "Connection & session info" },
   { command: "sessions", description: "List all sessions" },
   { command: "model", description: "Switch model" },

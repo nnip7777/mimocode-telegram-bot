@@ -2,6 +2,10 @@
 
 Telegram bot client for [MiMoCode](https://mimo.xiaomi.com/mimocode) — control your AI coding agent from your phone.
 
+## Security
+
+This bot lets whitelisted Telegram users drive a coding agent on your host. You **MUST** set `TELEGRAM_ALLOWED_USER_ID` — the bot refuses to start without it. Keep `MIMO_SKIP_PERMISSIONS=false` unless the host is disposable. Never share your bot token.
+
 ## Quick Start
 
 ### Prerequisites
@@ -102,9 +106,9 @@ Bot: [analyzes and fixes the bug]
 | `/start` | Show help & quick actions |
 | `/help` | Show all commands |
 | `/new` | Start a new session |
-| `/stop` | Stop running task |
+| `/cancel` | Stop running task |
 | `/status` | Connection & session info |
-| `/sessions` | List all sessions |
+| `/sessions` | List all sessions (reply number to switch) |
 | `/model` | Switch model |
 | `/use` | Switch agent (build/plan/compose) |
 | `/compose` | Run compose mode workflow |

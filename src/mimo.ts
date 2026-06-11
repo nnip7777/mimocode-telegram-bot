@@ -129,7 +129,6 @@ export class MimoClient {
   async sendMessage(
     chatId: string,
     text: string,
-    onDelta: (delta: string) => void,
     opts?: SendMessageOpts,
   ): Promise<MimoResponse> {
     const storedSessionId = this.sessions.get(chatId);
@@ -199,7 +198,6 @@ export class MimoClient {
               const part = event.part as { text?: string } | undefined;
               if (part?.text) {
                 fullContent += part.text;
-                onDelta(part.text);
               }
             }
             if (typeof event.sessionID === "string" && event.sessionID) {
