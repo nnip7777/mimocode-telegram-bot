@@ -27,7 +27,7 @@ export function createBot(config: Config) {
   const bot = new Bot(config.telegramToken);
   const mimo = new MimoClient(config);
   const processing = new Set<string>();
-  const lastSessions = new Map<string, Array<{ id: string; title: string }>>();
+  const lastSessions = new Map<string, { sessions: Array<{ id: string; title: string }>; ts: number }>();
 
   async function sendResult(chatId: string, msgId: number, content: string) {
     const cleaned = stripSystemTags(content);
@@ -218,7 +218,14 @@ export function createBot(config: Config) {
 
     lines.push(`Reply a number to switch session`);
 
-    lastSessions.set(chatId, sessions.map((s) => ({ id: s.id, title: s.title })));
+    const now = Date.now();
+    for (const [key, val] of lastSessions) {
+      if (now - val.ts > 5 * 60_000) lastSessions.delete(key);
+    }
+    lastSessions.set(chatId, {
+      sessions: sessions.map((s) => ({ id: s.id, title: s.title })),
+      ts: now,
+    });
     await sendLong(chatId, lines.join("\n"));
   });
 
@@ -487,9 +494,9 @@ export function createBot(config: Config) {
 
     const num = Number.parseInt(text, 10);
     if (num >= 1 && text === String(num)) {
-      const sessions = lastSessions.get(chatId);
-      if (sessions && num <= sessions.length) {
-        const target = sessions[num - 1];
+      const entry = lastSessions.get(chatId);
+      if (entry && num <= entry.sessions.length) {
+        const target = entry.sessions[num - 1];
         mimo.setSession(chatId, target.id);
         await ctx.reply(`Switched to session:\n<code>${target.id}</code>\n${target.title}`, { parse_mode: "HTML" });
         lastSessions.delete(chatId);
