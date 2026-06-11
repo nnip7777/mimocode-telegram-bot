@@ -1,5 +1,6 @@
 import { Bot, InlineKeyboard, InputFile } from "grammy";
 import type { Config } from "./config.js";
+import { isAllowed } from "./config.js";
 import { MimoClient } from "./mimo.js";
 
 function escapeHtml(text: string): string {
@@ -7,6 +8,15 @@ function escapeHtml(text: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function stripAnsi(text: string): string {
+  return text
+    .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "")
+    .replace(/\[[\?]?[0-9;]*[a-zA-Z]/g, "")
+    .replace(/[\u2500-\u257F]/g, "")
+    .replace(/[\u2580-\u259F]/g, "")
+    .replace(/[\u25A0-\u25FF]/g, "");
 }
 
 function markdownToTelegramHtml(text: string): string {
@@ -59,20 +69,37 @@ function markdownToTelegramHtml(text: string): string {
 }
 
 function wrapCode(text: string): string {
-  return `<pre><code>${escapeHtml(text)}</code></pre>`;
+  return `<pre><code>${escapeHtml(stripAnsi(text))}</code></pre>`;
 }
 
 function formatLong(text: string): string[] {
   const html = markdownToTelegramHtml(text);
   if (html.length <= 4096) return [html];
   const chunks: string[] = [];
-  let remaining = text;
+  let remaining = html;
   while (remaining.length > 0) {
-    const chunk = remaining.slice(0, 4000);
-    remaining = remaining.slice(4000);
-    chunks.push(markdownToTelegramHtml(chunk));
+    let cutAt = 4096;
+    if (remaining.length > 4096) {
+      const lastNewline = remaining.lastIndexOf("\n", 4096);
+      if (lastNewline > 2048) cutAt = lastNewline;
+    }
+    chunks.push(remaining.slice(0, cutAt));
+    remaining = remaining.slice(cutAt);
   }
   return chunks;
+}
+
+function parseJsonSafe<T>(raw: string, fallback: T): T {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function checkAuth(ctx: { from?: { id: number } }, config: Config): boolean {
+  if (!ctx.from) return false;
+  return isAllowed(String(ctx.from.id), config);
 }
 
 export function createBot(config: Config) {
@@ -80,16 +107,29 @@ export function createBot(config: Config) {
   const mimo = new MimoClient(config);
   const processing = new Set<string>();
 
-  // ── /start ───────────────────────────────────────────
-  bot.command("start", async (ctx) => {
-    if (!ctx.from) return;
-    const userId = String(ctx.from.id);
-    if (!isAllowed(userId, config)) {
-      await ctx.reply("Access denied.");
-      return;
+  async function sendResult(chatId: string, msgId: number, content: string) {
+    const chunks = formatLong(content);
+    try {
+      await bot.api.editMessageText(chatId, msgId, chunks[0], { parse_mode: "HTML" });
+      for (let i = 1; i < chunks.length; i++) {
+        await bot.api.sendMessage(chatId, chunks[i], { parse_mode: "HTML" });
+      }
+    } catch {
+      await bot.api.editMessageText(chatId, msgId, content.slice(0, 4096)).catch(() => {});
     }
-    const version = await mimo.getVersion();
-    const kb = new InlineKeyboard()
+  }
+
+  async function sendLong(chatId: string, text: string) {
+    const chunks = formatLong(text);
+    for (const chunk of chunks) {
+      await bot.api.sendMessage(chatId, chunk, { parse_mode: "HTML" }).catch(() =>
+        bot.api.sendMessage(chatId, chunk),
+      );
+    }
+  }
+
+  function mainMenuKb(): InlineKeyboard {
+    return new InlineKeyboard()
       .text("Status", "/status")
       .text("Sessions", "/sessions")
       .row()
@@ -97,43 +137,71 @@ export function createBot(config: Config) {
       .text("Stats", "/stats")
       .row()
       .text("New Session", "/new");
+  }
+
+  // ── /start ───────────────────────────────────────────
+  bot.command("start", async (ctx) => {
+    if (!checkAuth(ctx, config)) {
+      await ctx.reply("Access denied.");
+      return;
+    }
+    const version = await mimo.getVersion();
 
     await ctx.reply(
       `<b>MiMoCode Bot</b> v${version}\n\n` +
         `Send any message to chat with your MiMoCode agent.\n\n` +
-        `<b>Commands</b>\n` +
-        `/new — Start a new session\n` +
-        `/cancel — Cancel running task\n` +
-        `/status — Connection & session info\n` +
-        `/sessions — List all sessions\n` +
-        `/models — List available models\n` +
-        `/stats — Usage statistics\n` +
-        `/export — Export current session\n` +
-        `/providers — List AI providers\n` +
-        `/agent — Show current agent\n` +
-        `/delete &lt;id&gt; — Delete a session\n` +
-        `/version — MimoCode version`,
-      { parse_mode: "HTML", reply_markup: kb },
+        `<b>Quick Actions</b>`,
+      { parse_mode: "HTML", reply_markup: mainMenuKb() },
+    );
+  });
+
+  // ── /help ────────────────────────────────────────────
+  bot.command("help", async (ctx) => {
+    if (!checkAuth(ctx, config)) return;
+    await ctx.reply(
+      `<b>Commands</b>\n\n` +
+        `<b>Chat</b>\n` +
+        `Send any text to chat with MiMoCode\n\n` +
+        `<b>Sessions</b>\n` +
+        `/new — Start new session\n` +
+        `/stop — Stop running task\n` +
+        `/sessions — List sessions\n` +
+        `/export — Export session as JSON\n` +
+        `/delete — Delete a session\n\n` +
+        `<b>Modes</b>\n` +
+        `/use — Switch agent (build/plan/compose)\n` +
+        `/compose — Compose mode workflow\n` +
+        `/max — Max parallel sampling\n\n` +
+        `<b>Info</b>\n` +
+        `/model — Switch model\n` +
+        `/models — List models\n` +
+        `/status — Connection info\n` +
+        `/stats — Usage stats\n` +
+        `/providers — List providers\n` +
+        `/version — Version info`,
+      { parse_mode: "HTML", reply_markup: mainMenuKb() },
     );
   });
 
   // ── /version ─────────────────────────────────────────
   bot.command("version", async (ctx) => {
-    if (!ctx.from) return;
-    if (!isAllowed(String(ctx.from.id), config)) return;
+    if (!checkAuth(ctx, config)) return;
     const v = await mimo.getVersion();
     await ctx.reply(`MiMoCode v${v}`);
   });
 
   // ── /new ─────────────────────────────────────────────
   bot.command("new", async (ctx) => {
-    if (!ctx.from) return;
-    if (!isAllowed(String(ctx.from.id), config)) return;
+    if (!checkAuth(ctx, config)) return;
     const chatId = String(ctx.chat.id);
 
     const oldSession = mimo.getSessionId(chatId);
     if (oldSession) {
-      await mimo.exec(["session", "delete", oldSession]);
+      const r = await mimo.exec(["session", "delete", oldSession]);
+      if (r.code !== 0) {
+        await ctx.reply(`Failed to clear old session: ${r.stderr.slice(0, 200)}`);
+        return;
+      }
     }
     mimo.clearSession(chatId);
     await ctx.reply("Session cleared. Send a new message to start fresh.");
@@ -141,8 +209,7 @@ export function createBot(config: Config) {
 
   // ── /status ──────────────────────────────────────────
   bot.command("status", async (ctx) => {
-    if (!ctx.from) return;
-    if (!isAllowed(String(ctx.from.id), config)) return;
+    if (!checkAuth(ctx, config)) return;
     const chatId = String(ctx.chat.id);
 
     const [version, sessionList] = await Promise.all([
@@ -150,34 +217,35 @@ export function createBot(config: Config) {
       mimo.exec(["session", "list", "--format", "json"]),
     ]);
 
-    const sessions = JSON.parse(sessionList.stdout || "[]") as Array<{
-      id: string;
-      title: string;
-      updated: number;
-    }>;
+    const sessions = parseJsonSafe<Array<{ id: string; title: string; updated: number }>>(
+      sessionList.stdout, [],
+    );
 
     const currentSession = mimo.getSessionId(chatId);
     const current = sessions.find((s) => s.id === currentSession);
+    const model = mimo.getModel(chatId);
+    const agent = mimo.getAgent(chatId) ?? "build";
 
     const lines = [
-      `<b>MiMoCode Status</b>`,
+      `<b>Status</b>`,
       ``,
       `Version: ${version}`,
-      `CLI: OK`,
-      `Total sessions: ${sessions.length}`,
-      ``,
+      `Sessions: ${sessions.length}`,
+      `Model: <code>${model ?? "default"}</code>`,
+      `Agent: <code>${agent}</code>`,
     ];
 
     if (current) {
       const ago = Date.now() - current.updated;
       const mins = Math.floor(ago / 60000);
       lines.push(
-        `Current session: <code>${current.id.slice(0, 16)}...</code>`,
+        ``,
+        `Current: <code>${current.id.slice(0, 16)}...</code>`,
         `Title: ${current.title}`,
-        `Last active: ${mins < 1 ? "just now" : `${mins}m ago`}`,
+        `Active: ${mins < 1 ? "just now" : `${mins}m ago`}`,
       );
     } else {
-      lines.push(`No active session for this chat.`);
+      lines.push(``, `No active session.`);
     }
 
     await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
@@ -185,16 +253,12 @@ export function createBot(config: Config) {
 
   // ── /sessions ────────────────────────────────────────
   bot.command("sessions", async (ctx) => {
-    if (!ctx.from) return;
-    if (!isAllowed(String(ctx.from.id), config)) return;
+    if (!checkAuth(ctx, config)) return;
 
     const r = await mimo.exec(["session", "list", "--format", "json"]);
-    const sessions = JSON.parse(r.stdout || "[]") as Array<{
-      id: string;
-      title: string;
-      updated: number;
-      created: number;
-    }>;
+    const sessions = parseJsonSafe<Array<{
+      id: string; title: string; updated: number;
+    }>>(r.stdout, []);
 
     if (sessions.length === 0) {
       await ctx.reply("No sessions found.");
@@ -204,49 +268,171 @@ export function createBot(config: Config) {
     const currentSession = mimo.getSessionId(String(ctx.chat.id));
     const lines = [`<b>Sessions</b> (${sessions.length})\n`];
 
-    for (const s of sessions.slice(0, 20)) {
+    for (const s of sessions.slice(0, 15)) {
       const isCurrent = s.id === currentSession;
       const marker = isCurrent ? " *" : "";
       const ago = Date.now() - s.updated;
       const timeStr =
         ago < 60000
-          ? "just now"
+          ? "now"
           : ago < 3600000
-            ? `${Math.floor(ago / 60000)}m ago`
+            ? `${Math.floor(ago / 60000)}m`
             : ago < 86400000
-              ? `${Math.floor(ago / 3600000)}h ago`
-              : `${Math.floor(ago / 86400000)}d ago`;
+              ? `${Math.floor(ago / 3600000)}h`
+              : `${Math.floor(ago / 86400000)}d`;
       lines.push(
-        `<code>${s.id.slice(0, 20)}</code>${marker}`,
-        `  ${s.title} (${timeStr})`,
+        `<code>${s.id.slice(0, 16)}</code>${marker} ${timeStr}`,
+        `  ${s.title}`,
         ``,
       );
     }
 
-    if (sessions.length > 20) {
-      lines.push(`... and ${sessions.length - 20} more`);
+    if (sessions.length > 15) {
+      lines.push(`... and ${sessions.length - 15} more`);
     }
 
-    lines.push(`* = current session`);
+    await sendLong(String(ctx.chat.id), lines.join("\n"));
+  });
 
-    const chunks = formatLong(lines.join("\n"));
-    for (const chunk of chunks) {
-      await ctx.api.sendMessage(ctx.chat.id, chunk, { parse_mode: "HTML" }).catch(() =>
-        ctx.api.sendMessage(ctx.chat.id, chunk),
+  // ── /model ──────────────────────────────────────────
+  bot.command("model", async (ctx) => {
+    if (!checkAuth(ctx, config)) return;
+    const chatId = String(ctx.chat.id);
+    const target = ctx.match?.trim();
+
+    if (!target) {
+      const current = mimo.getModel(chatId);
+      const r = await mimo.exec(["models"], { timeoutMs: 10_000 });
+      const models = r.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+      const lines = [
+        `<b>Model</b>: <code>${current ?? "default"}</code>\n`,
+        models.map((m) => `• <code>${m}</code>`).join("\n"),
+        `\nUsage: /model &lt;provider/model&gt;`,
+      ];
+      await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+      return;
+    }
+
+    mimo.setModel(chatId, target);
+    await ctx.reply(`Model → <code>${target}</code>`, { parse_mode: "HTML" });
+  });
+
+  // ── /use ───────────────────────────────────────────
+  bot.command("use", async (ctx) => {
+    if (!checkAuth(ctx, config)) return;
+    const chatId = String(ctx.chat.id);
+    const target = ctx.match?.trim();
+
+    if (!target) {
+      const current = mimo.getAgent(chatId) ?? "build";
+      const lines = [
+        `<b>Agent</b>: <code>${current}</code>\n`,
+        `• <code>build</code> — Default execution`,
+        `• <code>plan</code> — Read-only analysis`,
+        `• <code>compose</code> — Full workflow`,
+        `\nUsage: /use &lt;agent&gt;`,
+      ];
+      await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+      return;
+    }
+
+    const validAgents = ["build", "plan", "compose"];
+    if (!validAgents.includes(target)) {
+      await ctx.reply(`Choose from: ${validAgents.join(", ")}`);
+      return;
+    }
+
+    mimo.setAgent(chatId, target);
+    await ctx.reply(`Agent → <code>${target}</code>`, { parse_mode: "HTML" });
+  });
+
+  // ── /compose ─────────────────────────────────────────
+  bot.command("compose", async (ctx) => {
+    if (!checkAuth(ctx, config)) return;
+    const chatId = String(ctx.chat.id);
+    const text = ctx.match?.trim();
+
+    if (!text) {
+      await ctx.reply(
+        `Usage: /compose &lt;your idea&gt;\n\n` +
+          `Runs: plan → code → test → review`,
       );
+      return;
+    }
+
+    if (processing.has(chatId)) {
+      await ctx.reply("Task running. Wait or /stop.");
+      return;
+    }
+
+    processing.add(chatId);
+    const startTime = Date.now();
+
+    try {
+      const sent = await ctx.reply("⏳ Compose: plan → code → test → review...");
+      const result = await mimo.sendMessage(chatId, text, () => {}, { agent: "compose" });
+
+      if (!result.content) {
+        await bot.api.editMessageText(chatId, sent.message_id, "(empty)").catch(() => {});
+        return;
+      }
+
+      await sendResult(chatId, sent.message_id, result.content);
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`[${new Date().toISOString()}] compose chat=${chatId} time=${elapsed}s`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      try { await ctx.reply(`Error: ${msg}`); } catch {}
+    } finally {
+      processing.delete(chatId);
+    }
+  });
+
+  // ── /max ────────────────────────────────────────────
+  bot.command("max", async (ctx) => {
+    if (!checkAuth(ctx, config)) return;
+    const chatId = String(ctx.chat.id);
+    const text = ctx.match?.trim();
+
+    if (!text) {
+      await ctx.reply("Usage: /max &lt;complex task&gt;");
+      return;
+    }
+
+    if (processing.has(chatId)) {
+      await ctx.reply("Task running. Wait or /stop.");
+      return;
+    }
+
+    processing.add(chatId);
+    const startTime = Date.now();
+
+    try {
+      const sent = await ctx.reply("⚡ Max mode...");
+      const result = await mimo.sendMessage(chatId, text, () => {}, { variant: "max" });
+
+      if (!result.content) {
+        await bot.api.editMessageText(chatId, sent.message_id, "(empty)").catch(() => {});
+        return;
+      }
+
+      await sendResult(chatId, sent.message_id, result.content);
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`[${new Date().toISOString()}] max chat=${chatId} time=${elapsed}s`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      try { await ctx.reply(`Error: ${msg}`); } catch {}
+    } finally {
+      processing.delete(chatId);
     }
   });
 
   // ── /models ──────────────────────────────────────────
   bot.command("models", async (ctx) => {
-    if (!ctx.from) return;
-    if (!isAllowed(String(ctx.from.id), config)) return;
+    if (!checkAuth(ctx, config)) return;
 
     const r = await mimo.exec(["models"], { timeoutMs: 10_000 });
-    const models = r.stdout
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
+    const models = r.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
 
     if (models.length === 0) {
       await ctx.reply("No models found.");
@@ -254,7 +440,7 @@ export function createBot(config: Config) {
     }
 
     const lines = [
-      `<b>Available Models</b> (${models.length})\n`,
+      `<b>Models</b> (${models.length})\n`,
       models.map((m) => `• <code>${m}</code>`).join("\n"),
     ];
 
@@ -263,8 +449,7 @@ export function createBot(config: Config) {
 
   // ── /stats ───────────────────────────────────────────
   bot.command("stats", async (ctx) => {
-    if (!ctx.from) return;
-    if (!isAllowed(String(ctx.from.id), config)) return;
+    if (!checkAuth(ctx, config)) return;
 
     const r = await mimo.exec(["stats"], { timeoutMs: 10_000 });
     const output = r.stdout.trim();
@@ -277,8 +462,7 @@ export function createBot(config: Config) {
 
   // ── /export ──────────────────────────────────────────
   bot.command("export", async (ctx) => {
-    if (!ctx.from) return;
-    if (!isAllowed(String(ctx.from.id), config)) return;
+    if (!checkAuth(ctx, config)) return;
     const chatId = String(ctx.chat.id);
 
     const sessionId = mimo.getSessionId(chatId);
@@ -293,19 +477,16 @@ export function createBot(config: Config) {
       return;
     }
 
-    // Send as file
     const data = Buffer.from(r.stdout, "utf-8");
     const file = new InputFile(data, `session-${sessionId.slice(0, 16)}.json`);
     await ctx.replyWithDocument(file).catch(async () => {
-      // Fallback: send as text
       await ctx.reply(r.stdout.slice(0, 4000));
     });
   });
 
   // ── /providers ───────────────────────────────────────
   bot.command("providers", async (ctx) => {
-    if (!ctx.from) return;
-    if (!isAllowed(String(ctx.from.id), config)) return;
+    if (!checkAuth(ctx, config)) return;
 
     const r = await mimo.exec(["providers", "list"], { timeoutMs: 10_000 });
     const output = r.stdout.trim();
@@ -316,48 +497,49 @@ export function createBot(config: Config) {
     await ctx.reply(wrapCode(output), { parse_mode: "HTML" });
   });
 
-  // ── /agent ───────────────────────────────────────────
-  bot.command("agent", async (ctx) => {
-    if (!ctx.from) return;
-    if (!isAllowed(String(ctx.from.id), config)) return;
-
-    const r = await mimo.exec(["agent", "list"], { timeoutMs: 10_000 });
-    const output = r.stdout.trim();
-    if (!output) {
-      await ctx.reply("No agents found.");
-      return;
-    }
-    await ctx.reply(wrapCode(output), { parse_mode: "HTML" });
-  });
-
-  // ── /delete <id> ─────────────────────────────────────
+  // ── /delete ──────────────────────────────────────────
   bot.command("delete", async (ctx) => {
-    if (!ctx.from) return;
-    if (!isAllowed(String(ctx.from.id), config)) return;
+    if (!checkAuth(ctx, config)) return;
+    const chatId = String(ctx.chat.id);
 
-    const sessionId = ctx.match;
+    const sessionId = ctx.match?.trim();
     if (!sessionId) {
-      await ctx.reply("Usage: /delete <session_id>");
+      const current = mimo.getSessionId(chatId);
+      if (!current) {
+        await ctx.reply("No active session to delete.");
+        return;
+      }
+      const r = await mimo.exec(["session", "delete", current]);
+      if (r.code === 0) {
+        mimo.clearSession(chatId);
+        await ctx.reply("Session deleted.");
+      } else {
+        await ctx.reply(`Delete failed: ${r.stderr.slice(0, 200)}`);
+      }
       return;
     }
 
     const r = await mimo.exec(["session", "delete", sessionId]);
     if (r.code === 0) {
-      mimo.clearSession(String(ctx.chat.id));
-      await ctx.reply(`Session ${sessionId.slice(0, 16)}... deleted.`);
+      if (mimo.getSessionId(chatId) === sessionId) {
+        mimo.clearSession(chatId);
+      }
+      await ctx.reply("Session deleted.");
     } else {
       await ctx.reply(`Delete failed: ${r.stderr.slice(0, 200)}`);
     }
   });
 
-  // ── /cancel ──────────────────────────────────────────
-  bot.command("cancel", async (ctx) => {
-    if (!ctx.from) return;
-    if (!isAllowed(String(ctx.from.id), config)) return;
+  // ── /stop ──────────────────────────────────────────
+  bot.command("stop", async (ctx) => {
+    if (!checkAuth(ctx, config)) return;
     const chatId = String(ctx.chat.id);
-    if (processing.has(chatId)) {
+    if (mimo.abort(chatId)) {
       processing.delete(chatId);
-      await ctx.reply("Task cancelled.");
+      await ctx.reply("Stopped.");
+    } else if (processing.has(chatId)) {
+      processing.delete(chatId);
+      await ctx.reply("Stopped (process already finished).");
     } else {
       await ctx.reply("No task running.");
     }
@@ -369,7 +551,6 @@ export function createBot(config: Config) {
     const userId = String(ctx.from.id);
     const chatId = String(ctx.chat.id);
     const text = ctx.message.text;
-    console.log(`[${new Date().toISOString()}] Received: chat=${chatId} user=${userId} text=${text.slice(0, 50)}`);
 
     if (!isAllowed(userId, config)) {
       await ctx.reply("Access denied.");
@@ -377,7 +558,7 @@ export function createBot(config: Config) {
     }
 
     if (processing.has(chatId)) {
-      await ctx.reply("Previous task still running. Wait or /cancel.");
+      await ctx.reply("Task running. Wait or /stop.");
       return;
     }
 
@@ -389,53 +570,18 @@ export function createBot(config: Config) {
       const result = await mimo.sendMessage(chatId, text, () => {});
 
       if (!result.content) {
-        await bot.api
-          .editMessageText(chatId, sent.message_id, "(empty response)")
-          .catch(() => {});
+        await bot.api.editMessageText(chatId, sent.message_id, "(empty)").catch(() => {});
         return;
       }
 
-      const html = markdownToTelegramHtml(result.content);
-
-      try {
-        if (html.length <= 4096) {
-          await bot.api.editMessageText(chatId, sent.message_id, html, {
-            parse_mode: "HTML",
-          });
-        } else {
-          const firstChunk = html.slice(0, 4096);
-          await bot.api.editMessageText(chatId, sent.message_id, firstChunk, {
-            parse_mode: "HTML",
-          });
-          let remaining = html.slice(4096);
-          while (remaining.length > 0) {
-            const chunk = remaining.slice(0, 4096);
-            remaining = remaining.slice(4096);
-            await bot.api.sendMessage(chatId, chunk, { parse_mode: "HTML" });
-          }
-        }
-      } catch {
-        await bot.api
-          .editMessageText(
-            chatId,
-            sent.message_id,
-            result.content.slice(0, 4096),
-          )
-          .catch(() => {});
-      }
+      await sendResult(chatId, sent.message_id, result.content);
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(
-        `[${new Date().toISOString()}] chat=${chatId} user=${userId} len=${result.content.length} time=${elapsed}s`,
-      );
+      console.log(`[${new Date().toISOString()}] chat=${chatId} user=${userId} time=${elapsed}s`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[${new Date().toISOString()}] Error: ${msg}`);
-      try {
-        await ctx.reply(`Error: ${msg}`);
-      } catch {
-        // ignore
-      }
+      try { await ctx.reply(`Error: ${msg}`); } catch {}
     } finally {
       processing.delete(chatId);
     }
@@ -446,9 +592,4 @@ export function createBot(config: Config) {
   });
 
   return bot;
-}
-
-function isAllowed(userId: string, config: Config): boolean {
-  if (config.allowedUserIds.length === 0) return true;
-  return config.allowedUserIds.includes(userId);
 }

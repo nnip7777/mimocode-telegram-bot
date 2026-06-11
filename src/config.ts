@@ -6,25 +6,12 @@ function env(key: string, fallback?: string): string {
   return val;
 }
 
-function envInt(key: string, fallback: number): number {
-  const raw = process.env[key];
-  return raw ? Number.parseInt(raw, 10) : fallback;
-}
-
-function envBool(key: string, fallback: boolean): boolean {
-  const raw = process.env[key];
-  if (!raw) return fallback;
-  return raw === "true" || raw === "1";
-}
-
 export type Config = {
   readonly telegramToken: string;
   readonly allowedUserIds: readonly string[];
   readonly mimoWorkDir: string;
   readonly mimoApiUrl?: string;
-  readonly sessionTimeoutMs: number;
-  readonly streamEditIntervalMs: number;
-  readonly maxMessageLen: number;
+  readonly skipPermissions: boolean;
 };
 
 export function loadConfig(): Config {
@@ -39,9 +26,7 @@ export function loadConfig(): Config {
     allowedUserIds,
     mimoWorkDir: env("MIMO_WORK_DIR", resolve(process.cwd())),
     mimoApiUrl: process.env.MIMO_API_URL || undefined,
-    sessionTimeoutMs: envInt("SESSION_TIMEOUT_MS", 30 * 60 * 1000),
-    streamEditIntervalMs: envInt("STREAM_EDIT_INTERVAL_MS", 600),
-    maxMessageLen: envInt("MAX_MESSAGE_LEN", 4000),
+    skipPermissions: process.env.MIMO_SKIP_PERMISSIONS === "true",
   };
 }
 

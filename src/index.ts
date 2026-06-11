@@ -45,21 +45,36 @@ if (config.allowedUserIds.length > 0) {
   console.warn("  Warning: No user whitelist — all users allowed");
 }
 
-await bot.api.setMyCommands([
+console.log("\n  Registering bot commands...");
+const cmdResult = await bot.api.setMyCommands([
   { command: "start", description: "Show help & quick actions" },
+  { command: "help", description: "Show all commands" },
   { command: "new", description: "Start a new session" },
+  { command: "stop", description: "Stop running task" },
   { command: "status", description: "Connection & session info" },
   { command: "sessions", description: "List all sessions" },
+  { command: "model", description: "Switch model" },
+  { command: "use", description: "Switch agent (build/plan/compose)" },
+  { command: "compose", description: "Run compose mode workflow" },
+  { command: "max", description: "Run with max parallel sampling" },
   { command: "models", description: "List available models" },
   { command: "stats", description: "Usage statistics" },
   { command: "export", description: "Export current session" },
   { command: "providers", description: "List AI providers" },
-  { command: "agent", description: "Show current agent" },
-  { command: "delete", description: "Delete a session (usage: /delete <id>)" },
+  { command: "delete", description: "Delete a session" },
   { command: "version", description: "MimoCode version" },
-  { command: "cancel", description: "Cancel running task" },
 ]);
+console.log(`  Commands registered: ${cmdResult ? "OK" : "FAILED"}`);
 
 console.log("\n  Bot started. Send /start in Telegram.\n");
 
-await bot.start();
+const stop = bot.start();
+process.on("SIGTERM", () => {
+  console.log("\n  Shutting down...");
+  bot.stop();
+});
+process.on("SIGINT", () => {
+  console.log("\n  Shutting down...");
+  bot.stop();
+});
+await stop;

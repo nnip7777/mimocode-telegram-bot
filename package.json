@@ -28,7 +28,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/user/mimocode-telegram-bot"
+    "url": "https://github.com/morandot/mimocode-telegram-bot"
   },
   "license": "MIT",
   "engines": {
@@ -39,6 +39,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/node": "^25.9.3",
     "typescript": "^5.9.3"
   }
 }
