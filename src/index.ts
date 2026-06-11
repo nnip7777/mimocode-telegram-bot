@@ -2,6 +2,7 @@ import { existsSync, copyFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadConfig } from "./config.js";
 import { createBot } from "./bot.js";
+import { MimoClient } from "./mimo.js";
 
 const root = resolve(import.meta.dirname ?? process.cwd(), "..");
 
@@ -26,12 +27,8 @@ console.log(`
 `);
 
 // Check if mimo CLI is available
-const { spawn } = await import("node:child_process");
-const check = spawn("mimo", ["--version"], { stdio: "ignore" });
-const mimoOk = await new Promise<boolean>((resolve) => {
-  check.on("close", (code) => resolve(code === 0));
-  check.on("error", () => resolve(false));
-});
+const checkMimo = new MimoClient(config);
+const mimoOk = await checkMimo.ping();
 
 if (mimoOk) {
   console.log("  MiMoCode CLI:  OK");
