@@ -1,12 +1,12 @@
 import { resolve } from "node:path";
 
-function env(key: string, fallback?: string): string {
+export function env(key: string, fallback?: string): string {
   const val = process.env[key] ?? fallback;
   if (val === undefined) throw new Error(`Missing env: ${key}`);
   return val;
 }
 
-function envBool(key: string, fallback: boolean): boolean {
+export function envBool(key: string, fallback: boolean): boolean {
   const raw = process.env[key];
   if (!raw) return fallback;
   return raw === "true" || raw === "1";

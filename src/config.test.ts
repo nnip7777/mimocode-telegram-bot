@@ -1,0 +1,165 @@
+import { describe, it, expect, beforeEach, afterAll } from "bun:test";
+import { isAllowed, loadConfig, env, envBool } from "./config.js";
+import type { Config } from "./config.js";
+
+// ── env helper ──────────────────────────────────────────
+
+describe("env", () => {
+  const ORIGINAL_ENV = { ...process.env };
+
+  beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  it("returns env var when set", () => {
+    process.env.TEST_KEY = "hello";
+    expect(env("TEST_KEY")).toBe("hello");
+  });
+
+  it("returns fallback when env var is missing", () => {
+    delete process.env.TEST_KEY;
+    expect(env("TEST_KEY", "default")).toBe("default");
+  });
+
+  it("throws when env var is missing and no fallback", () => {
+    delete process.env.TEST_KEY;
+    expect(() => env("TEST_KEY")).toThrow("Missing env: TEST_KEY");
+  });
+});
+
+// ── envBool helper ──────────────────────────────────────
+
+describe("envBool", () => {
+  const ORIGINAL_ENV = { ...process.env };
+
+  beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  it("returns true for 'true'", () => {
+    process.env.MY_BOOL = "true";
+    expect(envBool("MY_BOOL", false)).toBe(true);
+  });
+
+  it("returns true for '1'", () => {
+    process.env.MY_BOOL = "1";
+    expect(envBool("MY_BOOL", false)).toBe(true);
+  });
+
+  it("returns false for '0'", () => {
+    process.env.MY_BOOL = "0";
+    expect(envBool("MY_BOOL", true)).toBe(false);
+  });
+
+  it("returns false for 'false'", () => {
+    process.env.MY_BOOL = "false";
+    expect(envBool("MY_BOOL", true)).toBe(false);
+  });
+
+  it("returns fallback when env var is unset", () => {
+    delete process.env.MY_BOOL;
+    expect(envBool("MY_BOOL", true)).toBe(true);
+    expect(envBool("MY_BOOL", false)).toBe(false);
+  });
+});
+
+// ── isAllowed ───────────────────────────────────────────
+
+describe("isAllowed", () => {
+  const baseConfig: Config = {
+    telegramToken: "test-token",
+    allowedUserIds: ["111", "222"],
+    mimoWorkDir: "/tmp",
+    skipPermissions: false,
+  };
+
+  it("returns true for valid user ID", () => {
+    expect(isAllowed("111", baseConfig)).toBe(true);
+  });
+
+  it("returns false for invalid user ID", () => {
+    expect(isAllowed("999", baseConfig)).toBe(false);
+  });
+
+  it("returns true when allowedUserIds is empty (current behavior)", () => {
+    const emptyConfig: Config = { ...baseConfig, allowedUserIds: [] };
+    expect(isAllowed("anyone", emptyConfig)).toBe(true);
+  });
+});
+
+// ── loadConfig ──────────────────────────────────────────
+
+describe("loadConfig", () => {
+  const ORIGINAL_ENV = { ...process.env };
+
+  beforeEach(() => {
+    process.env = {
+      ...ORIGINAL_ENV,
+      TELEGRAM_BOT_TOKEN: "test-token-123",
+      TELEGRAM_ALLOWED_USER_ID: "111, 222",
+    };
+  });
+
+  afterAll(() => {
+    process.env = ORIGINAL_ENV;
+  });
+
+  it("returns correct Config with valid env vars", () => {
+    const config = loadConfig();
+    expect(config.telegramToken).toBe("test-token-123");
+    expect(config.allowedUserIds).toEqual(["111", "222"]);
+    expect(config.skipPermissions).toBe(false);
+  });
+
+  it("throws when TELEGRAM_BOT_TOKEN is missing", () => {
+    delete process.env.TELEGRAM_BOT_TOKEN;
+    expect(() => loadConfig()).toThrow("Missing env: TELEGRAM_BOT_TOKEN");
+  });
+
+  it("throws when TELEGRAM_ALLOWED_USER_ID is empty", () => {
+    process.env.TELEGRAM_ALLOWED_USER_ID = "";
+    expect(() => loadConfig()).toThrow("TELEGRAM_ALLOWED_USER_ID is empty");
+  });
+
+  it("parses multiple comma-separated user IDs", () => {
+    process.env.TELEGRAM_ALLOWED_USER_ID = "100,200,300";
+    const config = loadConfig();
+    expect(config.allowedUserIds).toEqual(["100", "200", "300"]);
+  });
+
+  it("trims whitespace around user IDs", () => {
+    process.env.TELEGRAM_ALLOWED_USER_ID = " 100 , 200 ";
+    const config = loadConfig();
+    expect(config.allowedUserIds).toEqual(["100", "200"]);
+  });
+
+  it("sets skipPermissions to true when MIMO_SKIP_PERMISSIONS=true", () => {
+    process.env.MIMO_SKIP_PERMISSIONS = "true";
+    const config = loadConfig();
+    expect(config.skipPermissions).toBe(true);
+  });
+
+  it("sets skipPermissions to true when MIMO_SKIP_PERMISSIONS=1", () => {
+    process.env.MIMO_SKIP_PERMISSIONS = "1";
+    const config = loadConfig();
+    expect(config.skipPermissions).toBe(true);
+  });
+
+  it("sets skipPermissions to false when MIMO_SKIP_PERMISSIONS=0", () => {
+    process.env.MIMO_SKIP_PERMISSIONS = "0";
+    const config = loadConfig();
+    expect(config.skipPermissions).toBe(false);
+  });
+
+  it("sets mimoApiUrl to undefined when not set", () => {
+    delete process.env.MIMO_API_URL;
+    const config = loadConfig();
+    expect(config.mimoApiUrl).toBeUndefined();
+  });
+
+  it("sets mimoApiUrl when MIMO_API_URL is set", () => {
+    process.env.MIMO_API_URL = "http://localhost:3000";
+    const config = loadConfig();
+    expect(config.mimoApiUrl).toBe("http://localhost:3000");
+  });
+});
