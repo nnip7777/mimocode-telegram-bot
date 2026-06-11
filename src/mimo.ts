@@ -114,32 +114,11 @@ export class MimoClient {
     return r.stdout.trim();
   }
 
-  private async sessionExists(sessionId: string): Promise<boolean> {
-    const r = await this.exec(["session", "list", "--format", "json"], { timeoutMs: 5000 });
-    if (r.code !== 0) return false;
-
-    try {
-      const sessions = JSON.parse(r.stdout) as Array<{ id?: string }>;
-      return sessions.some((s) => s.id === sessionId);
-    } catch {
-      return false;
-    }
-  }
-
   async sendMessage(
     chatId: string,
     text: string,
     opts?: SendMessageOpts,
   ): Promise<MimoResponse> {
-    const storedSessionId = this.sessions.get(chatId);
-    if (storedSessionId) {
-      const exists = await this.sessionExists(storedSessionId);
-      if (!exists) {
-        console.warn(`[mimo] session ${storedSessionId} not found; starting new session`);
-        this.sessions.delete(chatId);
-      }
-    }
-
     const sessionId = this.sessions.get(chatId);
     const model = opts?.model ?? this.chatModels.get(chatId);
     const agent = opts?.agent ?? this.chatAgents.get(chatId);
