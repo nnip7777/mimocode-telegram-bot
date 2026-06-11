@@ -96,7 +96,7 @@ export function formatLong(text: string): string[] {
     }
 
     chunks.push(markdownToTelegramHtml(remaining.slice(0, cutAt)));
-    remaining = remaining.slice(cutAt);
+    remaining = remaining.slice(cutAt + 1);
   }
 
   return chunks;

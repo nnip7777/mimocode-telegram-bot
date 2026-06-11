@@ -150,6 +150,13 @@ describe("formatLong", () => {
     expect(result.length).toBeGreaterThan(1);
   });
 
+  it("formatLong preserves content at chunk boundaries", () => {
+    const line = "a".repeat(3500);
+    const text = line + "\nnext paragraph";
+    const chunks = formatLong(text);
+    expect(chunks.length).toBe(2);
+  });
+
   it("each chunk is at most 3500 chars (after markdown conversion)", () => {
     const longText = "word ".repeat(1000); // ~5000 chars
     const result = formatLong(longText);
