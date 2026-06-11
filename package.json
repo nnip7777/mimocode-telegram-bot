@@ -1,0 +1,44 @@
+{
+  "name": "mimocode-telegram-bot",
+  "version": "0.1.0",
+  "description": "Telegram bot client for MiMoCode - control your AI coding agent from your phone",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mimocode-telegram-bot": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target node --banner '#!/usr/bin/env node'",
+    "typecheck": "bun x tsc --noEmit",
+    "prepublishOnly": "bun run build"
+  },
+  "keywords": [
+    "mimocode",
+    "telegram",
+    "bot",
+    "ai",
+    "coding-agent",
+    "opencode",
+    "xiaomi"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/user/mimocode-telegram-bot"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "grammy": "^1.21.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
+  }
+}
