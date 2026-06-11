@@ -8,10 +8,12 @@ export type MimoResponse = {
 
 export class MimoClient {
   private readonly workDir: string;
+  private readonly mimoApiUrl?: string;
   private sessions: Map<string, string> = new Map();
 
   constructor(config: Config) {
     this.workDir = config.mimoWorkDir;
+    this.mimoApiUrl = config.mimoApiUrl;
   }
 
   clearSession(chatId: string): void {
@@ -81,6 +83,9 @@ export class MimoClient {
       "--format", "json",
       "--dangerously-skip-permissions",
     ];
+    if (this.mimoApiUrl) {
+      args.push("--attach", this.mimoApiUrl, "--dir", this.workDir);
+    }
     if (sessionId) {
       args.push("--session", sessionId);
     }
@@ -117,6 +122,9 @@ export class MimoClient {
             }
             if (typeof event.sessionID === "string" && event.sessionID) {
               newSessionId = event.sessionID;
+            }
+            if (typeof event.sessionId === "string" && event.sessionId) {
+              newSessionId = event.sessionId;
             }
           } catch {
             // skip non-JSON lines

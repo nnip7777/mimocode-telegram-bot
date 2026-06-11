@@ -43,6 +43,7 @@ Copy `.env.example` to `.env` and fill in:
 | `TELEGRAM_BOT_TOKEN` | Yes | Bot token from @BotFather |
 | `TELEGRAM_ALLOWED_USER_ID` | Yes | Comma-separated Telegram user IDs |
 | `MIMO_WORK_DIR` | No | Working directory (default: cwd) |
+| `MIMO_API_URL` | No | Attach to an existing MiMoCode server, e.g. `http://127.0.0.1:4096` |
 | `SESSION_TIMEOUT_MS` | No | Session timeout (default: 30min) |
 
 ### Get Your Telegram User ID
@@ -73,6 +74,8 @@ Telegram User → Telegram API → Bot (grammY) → mimo run CLI → MiMoCode Ag
 ```
 
 The bot spawns `mimo run --format json` for each message, parses the JSON stream response, and sends it back via Telegram with Markdown→HTML formatting.
+
+When `MIMO_API_URL` is set, the bot passes `mimo run --attach <MIMO_API_URL> --dir <MIMO_WORK_DIR>` so it reuses an existing MiMoCode server instead of starting a new one.
 
 ## Development
 

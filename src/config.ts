@@ -21,6 +21,7 @@ export type Config = {
   readonly telegramToken: string;
   readonly allowedUserIds: readonly string[];
   readonly mimoWorkDir: string;
+  readonly mimoApiUrl?: string;
   readonly sessionTimeoutMs: number;
   readonly streamEditIntervalMs: number;
   readonly maxMessageLen: number;
@@ -37,6 +38,7 @@ export function loadConfig(): Config {
     telegramToken: env("TELEGRAM_BOT_TOKEN"),
     allowedUserIds,
     mimoWorkDir: env("MIMO_WORK_DIR", resolve(process.cwd())),
+    mimoApiUrl: process.env.MIMO_API_URL || undefined,
     sessionTimeoutMs: envInt("SESSION_TIMEOUT_MS", 30 * 60 * 1000),
     streamEditIntervalMs: envInt("STREAM_EDIT_INTERVAL_MS", 600),
     maxMessageLen: envInt("MAX_MESSAGE_LEN", 4000),
