@@ -110,43 +110,64 @@ export class MimoClient {
     return r.stdout.trim();
   }
 
+  private async sessionExists(sessionId: string): Promise<boolean> {
+    const r = await this.exec(["session", "list", "--format", "json"], { timeoutMs: 5000 });
+    if (r.code !== 0) return true;
+
+    try {
+      const sessions = JSON.parse(r.stdout) as Array<{ id?: string }>;
+      return sessions.some((s) => s.id === sessionId);
+    } catch {
+      return true;
+    }
+  }
+
   async sendMessage(
     chatId: string,
     text: string,
     onDelta: (delta: string) => void,
     opts?: SendMessageOpts,
   ): Promise<MimoResponse> {
+    const storedSessionId = this.sessions.get(chatId);
+    if (storedSessionId) {
+      const exists = await this.sessionExists(storedSessionId);
+      if (!exists) {
+        console.warn(`[mimo] session ${storedSessionId} not found; starting new session`);
+        this.sessions.delete(chatId);
+      }
+    }
+
     const sessionId = this.sessions.get(chatId);
     const model = opts?.model ?? this.chatModels.get(chatId);
     const agent = opts?.agent ?? this.chatAgents.get(chatId);
 
-    const args = [
-      "run", text,
-      "--format", "json",
-    ];
-    if (this.skipPermissions) {
-      args.push("--dangerously-skip-permissions");
-    }
-    if (this.mimoApiUrl) {
-      args.push("--attach", this.mimoApiUrl, "--dir", this.workDir);
-    }
-    if (sessionId) {
-      args.push("--session", sessionId);
-    }
-    if (model) {
-      args.push("--model", model);
-    }
-    if (agent) {
-      args.push("--agent", agent);
-    }
-    if (opts?.thinking) {
-      args.push("--thinking");
-    }
-    if (opts?.variant) {
-      args.push("--variant", opts.variant);
-    }
+    const runMimo = (sessionToUse?: string): Promise<MimoResponse> => new Promise((resolve, reject) => {
+      const args = [
+        "run", text,
+        "--format", "json",
+      ];
+      if (this.skipPermissions) {
+        args.push("--dangerously-skip-permissions");
+      }
+      if (this.mimoApiUrl) {
+        args.push("--attach", this.mimoApiUrl, "--dir", this.workDir);
+      }
+      if (sessionToUse) {
+        args.push("--session", sessionToUse);
+      }
+      if (model) {
+        args.push("--model", model);
+      }
+      if (agent) {
+        args.push("--agent", agent);
+      }
+      if (opts?.thinking) {
+        args.push("--thinking");
+      }
+      if (opts?.variant) {
+        args.push("--variant", opts.variant);
+      }
 
-    return new Promise((resolve, reject) => {
       const proc = spawn("mimo", args, {
         cwd: this.workDir,
         stdio: ["ignore", "pipe", "pipe"],
@@ -156,7 +177,7 @@ export class MimoClient {
       this.processes.set(chatId, proc);
 
       let fullContent = "";
-      let newSessionId = sessionId ?? "";
+      let newSessionId = sessionToUse ?? "";
       let stderr = "";
 
       const timer = setTimeout(() => {
@@ -212,5 +233,17 @@ export class MimoClient {
         reject(new Error(`Failed to spawn mimo: ${err.message}`));
       });
     });
+
+    try {
+      return await runMimo(sessionId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (sessionId && msg.includes("Session not found")) {
+        console.warn(`[mimo] session ${sessionId} not found during run; retrying with a new session`);
+        this.sessions.delete(chatId);
+        return runMimo();
+      }
+      throw err;
+    }
   }
 }
