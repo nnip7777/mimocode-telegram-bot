@@ -81,9 +81,9 @@ describe("isAllowed", () => {
     expect(isAllowed("999", baseConfig)).toBe(false);
   });
 
-  it("returns true when allowedUserIds is empty (current behavior)", () => {
+  it("returns false when allowedUserIds is empty", () => {
     const emptyConfig: Config = { ...baseConfig, allowedUserIds: [] };
-    expect(isAllowed("anyone", emptyConfig)).toBe(true);
+    expect(isAllowed("anyone", emptyConfig)).toBe(false);
   });
 });
 

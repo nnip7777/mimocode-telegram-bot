@@ -43,6 +43,5 @@ export function loadConfig(): Config {
 }
 
 export function isAllowed(userId: string, config: Config): boolean {
-  if (config.allowedUserIds.length === 0) return true;
   return config.allowedUserIds.includes(userId);
 }
