@@ -9,16 +9,16 @@ honor its STOP conditions, and update your row when done.
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
 | 001  | Add test infrastructure and characterization tests | P1 | M | — | DONE |
-| 002  | Remove dead auth bypass in isAllowed | P1 | S | — | TODO |
-| 003  | Sanitize error messages sent to users | P1 | S | — | TODO |
-| 004  | Fix chunking newline loss in formatLong | P1 | S | — | TODO |
-| 005  | Fix memory leak in lastSessions map | P2 | S | — | TODO |
-| 006  | Remove redundant --version call on startup | P2 | S | — | TODO |
-| 007  | Replace sessionExists RPC with lazy validation | P2 | M | — | TODO |
-| 008  | Make mimo run timeout configurable | P2 | S | — | TODO |
-| 009  | Extract shared message handler pattern | P2 | M | 001 | TODO |
-| 010  | Improve markdown-to-HTML converter robustness | P3 | M | 001 | TODO |
-| 011  | Add Biome linter and formatter | P3 | S | — | TODO |
+| 002  | Remove dead auth bypass in isAllowed | P1 | S | — | DONE |
+| 003  | Sanitize error messages sent to users | P1 | S | — | DONE |
+| 004  | Fix chunking newline loss in formatLong | P1 | S | — | DONE |
+| 005  | Fix memory leak in lastSessions map | P2 | S | — | DONE |
+| 006  | Remove redundant --version call on startup | P2 | S | — | DONE |
+| 007  | Replace sessionExists RPC with lazy validation | P2 | M | — | DONE |
+| 008  | Make mimo run timeout configurable | P2 | S | — | DONE |
+| 009  | Extract shared message handler pattern | P2 | M | 001 | DONE |
+| 010  | Improve markdown-to-HTML converter robustness | P3 | M | 001 | DONE |
+| 011  | Add Biome linter and formatter | P3 | S | — | DONE |
 
 ## Dependency notes
 
