@@ -386,7 +386,7 @@ export function createBot(config: Config) {
     }
 
     if (processing.has(chatId)) {
-      await ctx.reply("Task running. Wait or /stop.");
+      await ctx.reply("Task running. Wait or /cancel.");
       return;
     }
 
@@ -425,7 +425,7 @@ export function createBot(config: Config) {
     }
 
     if (processing.has(chatId)) {
-      await ctx.reply("Task running. Wait or /stop.");
+      await ctx.reply("Task running. Wait or /cancel.");
       return;
     }
 
@@ -595,7 +595,7 @@ export function createBot(config: Config) {
     }
 
     if (processing.has(chatId)) {
-      await ctx.reply("Task running. Wait or /stop.");
+      await ctx.reply("Task running. Wait or /cancel.");
       return;
     }
 

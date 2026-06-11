@@ -58,6 +58,8 @@ MIMO_API_URL=http://127.0.0.1:4096
 MIMO_SKIP_PERMISSIONS=false
 ```
 
+> `MIMO_SKIP_PERMISSIONS` accepts `true` or `1` to enable.
+
 ### 5. Start Chatting
 
 1. Open Telegram and search for your bot
