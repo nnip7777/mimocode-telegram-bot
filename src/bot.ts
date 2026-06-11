@@ -51,6 +51,42 @@ export function createBot(config: Config) {
     }
   }
 
+  type MimoRunOpts = {
+    placeholder: string;
+    logPrefix: string;
+    mimoOpts?: import("./mimo.js").SendMessageOpts;
+  };
+
+  async function runMimoCommand(
+    ctx: import("grammy").Context,
+    text: string,
+    opts: MimoRunOpts,
+  ) {
+    const chatId = String(ctx.chat!.id);
+    if (processing.has(chatId)) {
+      await ctx.reply("Task running. Wait or /cancel.");
+      return;
+    }
+    processing.add(chatId);
+    const startTime = Date.now();
+    try {
+      const sent = await ctx.reply(opts.placeholder);
+      const result = await mimo.sendMessage(chatId, text, opts.mimoOpts);
+      if (!result.content) {
+        await bot.api.editMessageText(chatId, sent.message_id, "(empty)").catch(() => {});
+        return;
+      }
+      await sendResult(chatId, sent.message_id, result.content);
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`[${new Date().toISOString()}] ${opts.logPrefix} chat=${chatId} time=${elapsed}s`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      try { await ctx.reply(`Error: ${sanitizeError(msg)}`); } catch {}
+    } finally {
+      processing.delete(chatId);
+    }
+  }
+
   function mainMenuKb(): InlineKeyboard {
     return new InlineKeyboard()
       .text("Status", "/status")
@@ -284,9 +320,7 @@ export function createBot(config: Config) {
   // ── /compose ─────────────────────────────────────────
   bot.command("compose", async (ctx) => {
     if (!checkAuth(ctx, config)) return;
-    const chatId = String(ctx.chat.id);
     const text = ctx.match?.trim();
-
     if (!text) {
       await ctx.reply(
         `Usage: /compose &lt;your idea&gt;\n\n` +
@@ -294,72 +328,18 @@ export function createBot(config: Config) {
       );
       return;
     }
-
-    if (processing.has(chatId)) {
-      await ctx.reply("Task running. Wait or /cancel.");
-      return;
-    }
-
-    processing.add(chatId);
-    const startTime = Date.now();
-
-    try {
-      const sent = await ctx.reply("⏳ Compose: plan → code → test → review...");
-      const result = await mimo.sendMessage(chatId, text, { agent: "compose" });
-
-      if (!result.content) {
-        await bot.api.editMessageText(chatId, sent.message_id, "(empty)").catch(() => {});
-        return;
-      }
-
-      await sendResult(chatId, sent.message_id, result.content);
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`[${new Date().toISOString()}] compose chat=${chatId} time=${elapsed}s`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      try { await ctx.reply(`Error: ${sanitizeError(msg)}`); } catch {}
-    } finally {
-      processing.delete(chatId);
-    }
+    await runMimoCommand(ctx, text, { placeholder: "⏳ Compose: plan → code → test → review...", logPrefix: "compose", mimoOpts: { agent: "compose" } });
   });
 
   // ── /max ────────────────────────────────────────────
   bot.command("max", async (ctx) => {
     if (!checkAuth(ctx, config)) return;
-    const chatId = String(ctx.chat.id);
     const text = ctx.match?.trim();
-
     if (!text) {
       await ctx.reply("Usage: /max &lt;complex task&gt;");
       return;
     }
-
-    if (processing.has(chatId)) {
-      await ctx.reply("Task running. Wait or /cancel.");
-      return;
-    }
-
-    processing.add(chatId);
-    const startTime = Date.now();
-
-    try {
-      const sent = await ctx.reply("⚡ Max mode...");
-      const result = await mimo.sendMessage(chatId, text, { variant: "max" });
-
-      if (!result.content) {
-        await bot.api.editMessageText(chatId, sent.message_id, "(empty)").catch(() => {});
-        return;
-      }
-
-      await sendResult(chatId, sent.message_id, result.content);
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`[${new Date().toISOString()}] max chat=${chatId} time=${elapsed}s`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      try { await ctx.reply(`Error: ${sanitizeError(msg)}`); } catch {}
-    } finally {
-      processing.delete(chatId);
-    }
+    await runMimoCommand(ctx, text, { placeholder: "⚡ Max mode...", logPrefix: "max", mimoOpts: { variant: "max" } });
   });
 
   // ── /models ──────────────────────────────────────────
@@ -504,34 +484,7 @@ export function createBot(config: Config) {
       }
     }
 
-    if (processing.has(chatId)) {
-      await ctx.reply("Task running. Wait or /cancel.");
-      return;
-    }
-
-    processing.add(chatId);
-    const startTime = Date.now();
-
-    try {
-      const sent = await ctx.reply("...");
-      const result = await mimo.sendMessage(chatId, text);
-
-      if (!result.content) {
-        await bot.api.editMessageText(chatId, sent.message_id, "(empty)").catch(() => {});
-        return;
-      }
-
-      await sendResult(chatId, sent.message_id, result.content);
-
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`[${new Date().toISOString()}] chat=${chatId} user=${userId} time=${elapsed}s`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[${new Date().toISOString()}] Error: ${msg}`);
-      try { await ctx.reply(`Error: ${sanitizeError(msg)}`); } catch {}
-    } finally {
-      processing.delete(chatId);
-    }
+    await runMimoCommand(ctx, text, { placeholder: "...", logPrefix: "chat" });
   });
 
   bot.catch((err) => {
