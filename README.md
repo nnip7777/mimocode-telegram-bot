@@ -30,11 +30,6 @@ This bot lets whitelisted Telegram users drive a coding agent on your host. You 
 ### 3. Install & Run
 
 ```bash
-# From npm
-npm install -g mimocode-telegram-bot
-mimocode-telegram-bot
-
-# Or from source
 git clone https://github.com/morandot/mimocode-telegram-bot.git
 cd mimocode-telegram-bot
 bun install
