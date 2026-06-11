@@ -17,6 +17,7 @@ export class MimoClient {
   private readonly workDir: string;
   private readonly mimoApiUrl?: string;
   private readonly skipPermissions: boolean;
+  private readonly runTimeoutMs: number;
   private sessions: Map<string, string> = new Map();
   private processes: Map<string, ChildProcess> = new Map();
   private chatModels: Map<string, string> = new Map();
@@ -26,6 +27,7 @@ export class MimoClient {
     this.workDir = config.mimoWorkDir;
     this.mimoApiUrl = config.mimoApiUrl;
     this.skipPermissions = config.skipPermissions;
+    this.runTimeoutMs = config.runTimeoutMs;
   }
 
   clearSession(chatId: string): void {
@@ -165,8 +167,8 @@ export class MimoClient {
       const timer = setTimeout(() => {
         proc.kill("SIGTERM");
         this.processes.delete(chatId);
-        reject(new Error("mimo run timed out (120s)"));
-      }, 120_000);
+        reject(new Error(`mimo run timed out (${this.runTimeoutMs / 1000}s)`));
+      }, this.runTimeoutMs);
 
       proc.stdout?.on("data", (chunk: Buffer) => {
         const lines = chunk.toString().split("\n").filter(Boolean);
