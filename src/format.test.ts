@@ -117,6 +117,35 @@ describe("markdownToTelegramHtml", () => {
     const result = markdownToTelegramHtml("`<script>`");
     expect(result).toContain("&lt;script&gt;");
   });
+
+  it("handles unclosed code fence", () => {
+    const input = "Here is code:\n```python\nprint('hello')\n";
+    const result = markdownToTelegramHtml(input);
+    expect(result).toContain("<pre><code>");
+    expect(result).toContain("</code></pre>");
+  });
+
+  it("handles task lists", () => {
+    const input = "- [x] Done\n- [ ] Todo";
+    const result = markdownToTelegramHtml(input);
+    expect(result).toContain("✅");
+    expect(result).toContain("⬜");
+  });
+
+  it("handles horizontal rules", () => {
+    const input = "Before\n---\nAfter";
+    const result = markdownToTelegramHtml(input);
+    expect(result).toContain("―");
+  });
+
+  it("does not trigger unclosed fence on already-closed fences", () => {
+    const input = "before\n```code\n```\nafter";
+    const result = markdownToTelegramHtml(input);
+    expect(result).toContain("before");
+    expect(result).toContain("after");
+    expect(result).toContain("<pre><code>");
+    expect(result).toContain("</code></pre>");
+  });
 });
 
 // ── wrapCode ────────────────────────────────────────────

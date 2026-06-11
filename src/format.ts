@@ -45,8 +45,19 @@ export function markdownToTelegramHtml(text: string): string {
     "<i>$1</i>",
   );
   text = text.replace(/~~(.+?)~~/g, "<s>$1</s>");
+  text = text.replace(/^[-*]\s+\[x\]\s+/gm, "✅ ");
+  text = text.replace(/^[-*]\s+\[ \]\s+/gm, "⬜ ");
+  text = text.replace(/^[-*_]{3,}\s*$/gm, "―");
   text = text.replace(/^[-*]\s+/gm, "• ");
   text = text.replace(/^(\d+)\.\s+/gm, "$1. ");
+
+  // Handle unclosed code fence
+  const unclosedFence = text.indexOf("```");
+  if (unclosedFence !== -1) {
+    const before = text.slice(0, unclosedFence);
+    const codeContent = text.slice(unclosedFence + 3).replace(/\n$/, "");
+    text = before + `<pre><code>${escapeHtml(codeContent)}</code></pre>`;
+  }
 
   for (let i = 0; i < inlineCodes.length; i++) {
     text = text.replace(
