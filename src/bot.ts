@@ -19,6 +19,10 @@ function stripAnsi(text: string): string {
     .replace(/[\u25A0-\u25FF]/g, "");
 }
 
+function stripSystemTags(text: string): string {
+  return text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim();
+}
+
 function markdownToTelegramHtml(text: string): string {
   if (!text) return "";
 
@@ -108,14 +112,15 @@ export function createBot(config: Config) {
   const processing = new Set<string>();
 
   async function sendResult(chatId: string, msgId: number, content: string) {
-    const chunks = formatLong(content);
+    const cleaned = stripSystemTags(content);
+    const chunks = formatLong(cleaned);
     try {
       await bot.api.editMessageText(chatId, msgId, chunks[0], { parse_mode: "HTML" });
       for (let i = 1; i < chunks.length; i++) {
         await bot.api.sendMessage(chatId, chunks[i], { parse_mode: "HTML" });
       }
     } catch {
-      await bot.api.editMessageText(chatId, msgId, content.slice(0, 4096)).catch(() => {});
+      await bot.api.editMessageText(chatId, msgId, cleaned.slice(0, 4096)).catch(() => {});
     }
   }
 
