@@ -14,6 +14,15 @@ function checkAuth(ctx: { from?: { id: number } }, config: Config): boolean {
   return isAllowed(String(ctx.from.id), config);
 }
 
+function sanitizeError(raw: string): string {
+  let clean = raw
+    .replace(/\/[\w./-]+/g, "<path>")
+    .replace(/[A-Z]:\\[\w\\.-]+/gi, "<path>");
+  clean = clean.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "");
+  if (clean.length > 100) clean = clean.slice(0, 100) + "...";
+  return clean || "Unknown error";
+}
+
 export function createBot(config: Config) {
   const bot = new Bot(config.telegramToken);
   const mimo = new MimoClient(config);
@@ -113,7 +122,7 @@ export function createBot(config: Config) {
     if (oldSession) {
       const r = await mimo.exec(["session", "delete", oldSession]);
       if (r.code !== 0) {
-        await ctx.reply(`Failed to clear old session: ${r.stderr.slice(0, 200)}`);
+        await ctx.reply(`Failed to clear old session: ${sanitizeError(r.stderr)}`);
         return;
       }
     }
@@ -301,7 +310,7 @@ export function createBot(config: Config) {
       console.log(`[${new Date().toISOString()}] compose chat=${chatId} time=${elapsed}s`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      try { await ctx.reply(`Error: ${msg}`); } catch {}
+      try { await ctx.reply(`Error: ${sanitizeError(msg)}`); } catch {}
     } finally {
       processing.delete(chatId);
     }
@@ -340,7 +349,7 @@ export function createBot(config: Config) {
       console.log(`[${new Date().toISOString()}] max chat=${chatId} time=${elapsed}s`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      try { await ctx.reply(`Error: ${msg}`); } catch {}
+      try { await ctx.reply(`Error: ${sanitizeError(msg)}`); } catch {}
     } finally {
       processing.delete(chatId);
     }
@@ -392,7 +401,7 @@ export function createBot(config: Config) {
 
     const r = await mimo.exec(["export", sessionId], { timeoutMs: 15_000 });
     if (r.code !== 0) {
-      await ctx.reply(`Export failed: ${r.stderr.slice(0, 200)}`);
+      await ctx.reply(`Export failed: ${sanitizeError(r.stderr)}`);
       return;
     }
 
@@ -433,7 +442,7 @@ export function createBot(config: Config) {
         mimo.clearSession(chatId);
         await ctx.reply("Session deleted.");
       } else {
-        await ctx.reply(`Delete failed: ${r.stderr.slice(0, 200)}`);
+        await ctx.reply(`Delete failed: ${sanitizeError(r.stderr)}`);
       }
       return;
     }
@@ -445,7 +454,7 @@ export function createBot(config: Config) {
       }
       await ctx.reply("Session deleted.");
     } else {
-      await ctx.reply(`Delete failed: ${r.stderr.slice(0, 200)}`);
+      await ctx.reply(`Delete failed: ${sanitizeError(r.stderr)}`);
     }
   });
 
@@ -512,7 +521,7 @@ export function createBot(config: Config) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[${new Date().toISOString()}] Error: ${msg}`);
-      try { await ctx.reply(`Error: ${msg}`); } catch {}
+      try { await ctx.reply(`Error: ${sanitizeError(msg)}`); } catch {}
     } finally {
       processing.delete(chatId);
     }
