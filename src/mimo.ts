@@ -153,10 +153,11 @@ export class MimoClient {
   }
 
   async getVersion(): Promise<string> {
-    if (this.cachedVersion !== undefined) return this.cachedVersion;
+    if (this.cachedVersion) return this.cachedVersion;
     const r = await this.exec(["--version"], { timeoutMs: 5000 });
-    this.cachedVersion = r.stdout.trim();
-    return this.cachedVersion;
+    const version = r.stdout.trim();
+    if (version) this.cachedVersion = version;
+    return version;
   }
 
   async sendMessage(

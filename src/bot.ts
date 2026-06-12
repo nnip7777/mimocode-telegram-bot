@@ -38,21 +38,21 @@ export function createBot(config: Config) {
   async function sendResult(chatId: string, msgId: number, content: string) {
     const cleaned = stripSystemTags(content);
     const chunks = formatLong(cleaned);
+    // First chunk: edit the placeholder. On HTML failure, retry as plain text.
     try {
       await bot.api.editMessageText(chatId, msgId, chunks[0], {
         parse_mode: "HTML",
       });
-      for (let i = 1; i < chunks.length; i++) {
-        await bot.api.sendMessage(chatId, chunks[i], { parse_mode: "HTML" });
-      }
     } catch {
-      // First chunk failed as HTML — send ALL chunks as plain text
+      await bot.api
+        .editMessageText(chatId, msgId, chunks[0].replace(/<[^>]+>/g, ""))
+        .catch(() => {});
+    }
+    // Subsequent chunks: each has its own try/catch to avoid mixing modes on partial failures.
+    for (let i = 1; i < chunks.length; i++) {
       try {
-        await bot.api.editMessageText(chatId, msgId, cleaned.slice(0, 4096));
+        await bot.api.sendMessage(chatId, chunks[i], { parse_mode: "HTML" });
       } catch {
-        // edit also failed, nothing more to do for the first chunk
-      }
-      for (let i = 1; i < chunks.length; i++) {
         await bot.api
           .sendMessage(chatId, chunks[i].replace(/<[^>]+>/g, ""))
           .catch(() => {});
