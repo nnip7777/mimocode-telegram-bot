@@ -22,6 +22,7 @@ export class MimoClient {
   private processes: Map<string, ChildProcess> = new Map();
   private chatModels: Map<string, string> = new Map();
   private chatAgents: Map<string, string> = new Map();
+  private cachedVersion: string | undefined;
 
   constructor(config: Config) {
     this.workDir = config.mimoWorkDir;
@@ -71,16 +72,56 @@ export class MimoClient {
     return false;
   }
 
+  private spawnProcess(args: string[]): ChildProcess {
+    return spawn("mimo", args, {
+      cwd: this.workDir,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env },
+    });
+  }
+
+  private spawnStreaming(
+    args: string[],
+    chatId: string,
+    onStdout: (chunk: Buffer) => void,
+    opts?: { timeoutMs?: number },
+  ): Promise<{ stderr: string; code: number }> {
+    return new Promise((resolve, reject) => {
+      const proc = this.spawnProcess(args);
+      this.processes.set(chatId, proc);
+
+      let stderr = "";
+      const timeout = opts?.timeoutMs ?? this.runTimeoutMs;
+
+      const timer = setTimeout(() => {
+        proc.kill("SIGTERM");
+        this.processes.delete(chatId);
+        reject(new Error(`mimo timed out (${timeout}ms)`));
+      }, timeout);
+
+      proc.stdout?.on("data", onStdout);
+      proc.stderr?.on("data", (c: Buffer) => (stderr += c.toString()));
+
+      proc.on("close", (code) => {
+        clearTimeout(timer);
+        this.processes.delete(chatId);
+        resolve({ stderr, code: code ?? -1 });
+      });
+
+      proc.on("error", (err) => {
+        clearTimeout(timer);
+        this.processes.delete(chatId);
+        reject(new Error(`Failed to spawn mimo: ${err.message}`));
+      });
+    });
+  }
+
   async exec(
     args: string[],
     opts?: { timeoutMs?: number },
   ): Promise<{ stdout: string; stderr: string; code: number }> {
     return new Promise((resolve, reject) => {
-      const proc = spawn("mimo", args, {
-        cwd: this.workDir,
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env },
-      });
+      const proc = this.spawnProcess(args);
 
       let stdout = "";
       let stderr = "";
@@ -112,8 +153,10 @@ export class MimoClient {
   }
 
   async getVersion(): Promise<string> {
+    if (this.cachedVersion !== undefined) return this.cachedVersion;
     const r = await this.exec(["--version"], { timeoutMs: 5000 });
-    return r.stdout.trim();
+    this.cachedVersion = r.stdout.trim();
+    return this.cachedVersion;
   }
 
   async sendMessage(
@@ -125,52 +168,37 @@ export class MimoClient {
     const model = opts?.model ?? this.chatModels.get(chatId);
     const agent = opts?.agent ?? this.chatAgents.get(chatId);
 
-    const runMimo = (sessionToUse?: string): Promise<MimoResponse> =>
-      new Promise((resolve, reject) => {
-        const args = ["run", text, "--format", "json"];
-        if (this.skipPermissions) {
-          args.push("--dangerously-skip-permissions");
-        }
-        if (this.mimoApiUrl) {
-          args.push("--attach", this.mimoApiUrl, "--dir", this.workDir);
-        }
-        if (sessionToUse) {
-          args.push("--session", sessionToUse);
-        }
-        if (model) {
-          args.push("--model", model);
-        }
-        if (agent) {
-          args.push("--agent", agent);
-        }
-        if (opts?.thinking) {
-          args.push("--thinking");
-        }
-        if (opts?.variant) {
-          args.push("--variant", opts.variant);
-        }
+    const runMimo = async (sessionToUse?: string): Promise<MimoResponse> => {
+      const args = ["run", text, "--format", "json"];
+      if (this.skipPermissions) {
+        args.push("--dangerously-skip-permissions");
+      }
+      if (this.mimoApiUrl) {
+        args.push("--attach", this.mimoApiUrl, "--dir", this.workDir);
+      }
+      if (sessionToUse) {
+        args.push("--session", sessionToUse);
+      }
+      if (model) {
+        args.push("--model", model);
+      }
+      if (agent) {
+        args.push("--agent", agent);
+      }
+      if (opts?.thinking) {
+        args.push("--thinking");
+      }
+      if (opts?.variant) {
+        args.push("--variant", opts.variant);
+      }
 
-        const proc = spawn("mimo", args, {
-          cwd: this.workDir,
-          stdio: ["ignore", "pipe", "pipe"],
-          env: { ...process.env },
-        });
+      let fullContent = "";
+      let newSessionId = sessionToUse ?? "";
 
-        this.processes.set(chatId, proc);
-
-        let fullContent = "";
-        let newSessionId = sessionToUse ?? "";
-        let stderr = "";
-
-        const timer = setTimeout(() => {
-          proc.kill("SIGTERM");
-          this.processes.delete(chatId);
-          reject(
-            new Error(`mimo run timed out (${this.runTimeoutMs / 1000}s)`),
-          );
-        }, this.runTimeoutMs);
-
-        proc.stdout?.on("data", (chunk: Buffer) => {
+      const { stderr, code } = await this.spawnStreaming(
+        args,
+        chatId,
+        (chunk: Buffer) => {
           const lines = chunk.toString().split("\n").filter(Boolean);
           for (const line of lines) {
             try {
@@ -191,35 +219,20 @@ export class MimoClient {
               // skip non-JSON lines
             }
           }
-        });
+        },
+        { timeoutMs: this.runTimeoutMs },
+      );
 
-        proc.stderr?.on("data", (chunk: Buffer) => {
-          stderr += chunk.toString();
-        });
-
-        proc.on("close", (code) => {
-          clearTimeout(timer);
-          this.processes.delete(chatId);
-          if (code !== 0 && !fullContent) {
-            reject(
-              new Error(
-                `mimo run failed (code ${code}): ${stderr.slice(0, 200)}`,
-              ),
-            );
-            return;
-          }
-          if (newSessionId) {
-            this.sessions.set(chatId, newSessionId);
-          }
-          resolve({ content: fullContent, sessionId: newSessionId });
-        });
-
-        proc.on("error", (err) => {
-          clearTimeout(timer);
-          this.processes.delete(chatId);
-          reject(new Error(`Failed to spawn mimo: ${err.message}`));
-        });
-      });
+      if (code !== 0 && !fullContent) {
+        throw new Error(
+          `mimo run failed (code ${code}): ${stderr.slice(0, 200)}`,
+        );
+      }
+      if (newSessionId) {
+        this.sessions.set(chatId, newSessionId);
+      }
+      return { content: fullContent, sessionId: newSessionId };
+    };
 
     try {
       return await runMimo(sessionId);

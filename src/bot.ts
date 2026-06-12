@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard, InputFile } from "grammy";
+import { Bot, type Context, InlineKeyboard, InputFile } from "grammy";
 import type { Config } from "./config.js";
 import { isAllowed } from "./config.js";
 import {
@@ -7,14 +7,17 @@ import {
   stripSystemTags,
   wrapCode,
 } from "./format.js";
-import { MimoClient } from "./mimo.js";
+import { MimoClient, type SendMessageOpts } from "./mimo.js";
 
-function checkAuth(ctx: { from?: { id: number } }, config: Config): boolean {
+export function checkAuth(
+  ctx: { from?: { id: number } },
+  config: Config,
+): boolean {
   if (!ctx.from) return false;
   return isAllowed(String(ctx.from.id), config);
 }
 
-function sanitizeError(raw: string): string {
+export function sanitizeError(raw: string): string {
   let clean = raw
     .replace(/\/[\w./-]+/g, "<path>")
     .replace(/[A-Z]:\\[\w\\.-]+/gi, "<path>");
@@ -43,32 +46,38 @@ export function createBot(config: Config) {
         await bot.api.sendMessage(chatId, chunks[i], { parse_mode: "HTML" });
       }
     } catch {
-      await bot.api
-        .editMessageText(chatId, msgId, cleaned.slice(0, 4096))
-        .catch(() => {});
+      // First chunk failed as HTML — send ALL chunks as plain text
+      try {
+        await bot.api.editMessageText(chatId, msgId, cleaned.slice(0, 4096));
+      } catch {
+        // edit also failed, nothing more to do for the first chunk
+      }
+      for (let i = 1; i < chunks.length; i++) {
+        await bot.api
+          .sendMessage(chatId, chunks[i].replace(/<[^>]+>/g, ""))
+          .catch(() => {});
+      }
     }
   }
 
   async function sendLong(chatId: string, text: string) {
     const chunks = formatLong(text);
     for (const chunk of chunks) {
-      await bot.api
-        .sendMessage(chatId, chunk, { parse_mode: "HTML" })
-        .catch(() => bot.api.sendMessage(chatId, chunk));
+      try {
+        await bot.api.sendMessage(chatId, chunk, { parse_mode: "HTML" });
+      } catch {
+        await bot.api.sendMessage(chatId, chunk.replace(/<[^>]+>/g, ""));
+      }
     }
   }
 
   type MimoRunOpts = {
     placeholder: string;
     logPrefix: string;
-    mimoOpts?: import("./mimo.js").SendMessageOpts;
+    mimoOpts?: SendMessageOpts;
   };
 
-  async function runMimoCommand(
-    ctx: import("grammy").Context,
-    text: string,
-    opts: MimoRunOpts,
-  ) {
+  async function runMimoCommand(ctx: Context, text: string, opts: MimoRunOpts) {
     const chatId = String(ctx.chat?.id);
     if (processing.has(chatId)) {
       await ctx.reply("Task running. Wait or /cancel.");

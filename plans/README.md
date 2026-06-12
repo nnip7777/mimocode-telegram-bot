@@ -19,6 +19,14 @@ honor its STOP conditions, and update your row when done.
 | 009  | Extract shared message handler pattern | P2 | M | 001 | DONE |
 | 010  | Improve markdown-to-HTML converter robustness | P3 | M | 001 | DONE |
 | 011  | Add Biome linter and formatter | P3 | S | — | DONE |
+| 012  | Add lint and test steps to CI | P3 | S | 011 | DONE |
+| 013  | Fix sendLong retry (strip HTML) | P2 | S | — | DONE |
+| 014  | Fix sendResult fallback (send all chunks) | P2 | S | — | DONE |
+| 015  | Export checkAuth/sanitizeError + bot tests | P2 | M | — | DONE |
+| 016  | MimoClient unit tests | P2 | M | — | DONE |
+| 017  | Cache getVersion result | P2 | S | — | DONE |
+| 018  | Extract spawnProcess/spawnStreaming | P2 | M | — | DONE |
+| 019  | Replace inline imports with top-level | P3 | S | — | DONE |
 
 ## Dependency notes
 
