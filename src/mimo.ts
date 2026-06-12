@@ -228,6 +228,13 @@ export class MimoClient {
           `mimo run failed (code ${code}): ${stderr.slice(0, 200)}`,
         );
       }
+      // mimo CLI exits 0 even when it logs a "Session not found" error to stderr.
+      // Treat that as a stale-session failure so the caller can retry.
+      if (fullContent === "" && /Session not found/.test(stderr)) {
+        throw new Error(
+          `mimo run failed: Session not found: ${stderr.slice(0, 200)}`,
+        );
+      }
       if (newSessionId) {
         this.sessions.set(chatId, newSessionId);
       }

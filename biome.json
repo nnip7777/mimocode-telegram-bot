@@ -27,5 +27,5 @@
       "trailingCommas": "all"
     }
   },
-  "files": { "includes": ["src/**"], "experimentalScannerIgnores": ["dist", "node_modules", "*.tgz"] }
+  "files": { "includes": ["src/**", "tests/**"], "experimentalScannerIgnores": ["dist", "node_modules", "*.tgz"] }
 }
