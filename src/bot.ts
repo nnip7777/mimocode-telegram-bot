@@ -167,7 +167,6 @@ export function createBot(config: Config) {
   }
 
   type MimoRunOpts = {
-    placeholder: string;
     logPrefix: string;
     mimoOpts?: SendMessageOpts;
   };
@@ -180,8 +179,15 @@ export function createBot(config: Config) {
     }
     processing.add(chatId);
     const startTime = Date.now();
+
+    // Keep the "typing…" indicator alive while mimo is working.
+    // Telegram expires the status after ~5 seconds, so refresh every 4s.
+    const typingInterval = setInterval(() => {
+      bot.api.sendChatAction(chatId, "typing").catch(() => {});
+    }, 4000);
+    bot.api.sendChatAction(chatId, "typing").catch(() => {});
+
     try {
-      const sent = await ctx.reply(opts.placeholder);
 
       const onEvent = (event: Record<string, unknown>) => {
         const evType = event.type as string | undefined;
@@ -189,8 +195,6 @@ export function createBot(config: Config) {
         const v = getVerbosity(evType, config);
         if (v === "off") return;
         if (evType === "text") {
-          // text events are accumulated and sent at the end;
-          // only handle non-full verbosity for incremental text preview
           if (v === "brief") {
             const part = event.part as { text?: string } | undefined;
             const firstLine = (part?.text ?? "").split("\n")[0] ?? "";
@@ -200,7 +204,6 @@ export function createBot(config: Config) {
           } else if (v === "hint") {
             bot.api.sendMessage(chatId, hintIcon(evType) + " 回复中...").catch(() => {});
           }
-          // "full": text is handled at the end by sendLong
           return;
         }
         if (v === "hint") {
@@ -217,25 +220,9 @@ export function createBot(config: Config) {
         onEvent,
       };
       const result = await mimo.sendMessage(chatId, text, mergedOpts);
-      if (config.showText === "off") {
-        await bot.api.deleteMessage(chatId, sent.message_id).catch(() => {});
+
+      if (!result.content || config.showText === "off") {
         return;
-      }
-      if (!result.content) {
-        if (config.showText === "hint") {
-          await bot.api.editMessageText(chatId, sent.message_id, "(empty)")
-            .catch(() => {});
-        } else {
-          await bot.api
-            .editMessageText(chatId, sent.message_id, "(empty)")
-            .catch(() => {});
-        }
-        return;
-      }
-      // Delete placeholder so final text appears as a new message at the bottom.
-      // Keep placeholder only for hint mode which doesn't send final content.
-      if (config.showText !== "hint") {
-        await bot.api.deleteMessage(chatId, sent.message_id).catch(() => {});
       }
       if (config.showText === "full") {
         await sendLong(chatId, stripSystemTags(result.content));
@@ -244,8 +231,7 @@ export function createBot(config: Config) {
         await bot.api.sendMessage(chatId, firstLine.slice(0, 500))
           .catch(() => {});
       } else if (config.showText === "hint") {
-        await bot.api.editMessageText(chatId, sent.message_id, "✓ 已回复")
-          .catch(() => {});
+        await bot.api.sendMessage(chatId, "✓ 已回复").catch(() => {});
       }
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       console.log(
@@ -257,6 +243,7 @@ export function createBot(config: Config) {
         await ctx.reply(`Error: ${sanitizeError(msg)}`);
       } catch {}
     } finally {
+      clearInterval(typingInterval);
       processing.delete(chatId);
     }
   }
@@ -512,7 +499,6 @@ export function createBot(config: Config) {
       return;
     }
     await runMimoCommand(ctx, text, {
-      placeholder: "⏳ Compose: plan → code → test → review...",
       logPrefix: "compose",
       mimoOpts: { agent: "compose" },
     });
@@ -527,7 +513,6 @@ export function createBot(config: Config) {
       return;
     }
     await runMimoCommand(ctx, text, {
-      placeholder: "⚡ Max mode...",
       logPrefix: "max",
       mimoOpts: { variant: "max" },
     });
@@ -681,7 +666,7 @@ export function createBot(config: Config) {
       }
     }
 
-    await runMimoCommand(ctx, text, { placeholder: "...", logPrefix: "chat" });
+    await runMimoCommand(ctx, text, { logPrefix: "chat" });
   });
 
   bot.catch((err) => {
