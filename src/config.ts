@@ -12,12 +12,30 @@ export function envBool(key: string, fallback: boolean): boolean {
   return raw === "true" || raw === "1";
 }
 
+export type Verbosity = "full" | "brief" | "hint" | "off";
+
+export function envVerbosity(key: string, fallback: Verbosity): Verbosity {
+  const raw = process.env[key];
+  if (!raw) return fallback;
+  const valid = ["full", "brief", "hint", "off"] as const;
+  if ((valid as readonly string[]).includes(raw)) return raw as Verbosity;
+  console.warn(
+    `${key}=${raw} is invalid; using ${fallback}. Valid: ${valid.join(", ")}`,
+  );
+  return fallback;
+}
+
 export type Config = {
   readonly telegramToken: string;
   readonly allowedUserIds: readonly string[];
   readonly mimoWorkDir: string;
   readonly mimoApiUrl?: string;
   readonly skipPermissions: boolean;
+  readonly showText: Verbosity;
+  readonly showReasoning: Verbosity;
+  readonly showToolUse: Verbosity;
+  readonly showStepStart: Verbosity;
+  readonly showStepFinish: Verbosity;
 };
 
 export function loadConfig(): Config {
@@ -39,6 +57,11 @@ export function loadConfig(): Config {
     mimoWorkDir: env("MIMO_WORK_DIR", resolve(process.cwd())),
     mimoApiUrl: process.env.MIMO_API_URL || undefined,
     skipPermissions: envBool("MIMO_SKIP_PERMISSIONS", false),
+    showText: envVerbosity("MIMO_SHOW_TEXT", "full"),
+    showReasoning: envVerbosity("MIMO_SHOW_REASONING", "off"),
+    showToolUse: envVerbosity("MIMO_SHOW_TOOL_USE", "off"),
+    showStepStart: envVerbosity("MIMO_SHOW_STEP_START", "off"),
+    showStepFinish: envVerbosity("MIMO_SHOW_STEP_FINISH", "off"),
   };
 }
 

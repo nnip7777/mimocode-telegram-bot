@@ -46,6 +46,14 @@ TELEGRAM_ALLOWED_USER_ID=111111,222222 # 逗号分隔的白名单，空则拒绝
 MIMO_WORK_DIR=/path/to/project         # mimo CLI 的工作目录（默认当前目录）
 MIMO_API_URL=http://127.0.0.1:4096     # 连接已有 MiMoCode 服务（不填则自动启动）
 MIMO_SKIP_PERMISSIONS=true             # 跳过权限确认（危险，慎用）
+
+# 控制 MiMoCode 各事件类型在 Telegram 中的可见性。
+# 取值: full(完整内容) / brief(单行摘要) / hint(仅占位提示) / off(不显示)
+# MIMO_SHOW_TEXT=full           # 最终文本回复（默认 full）
+# MIMO_SHOW_REASONING=off        # 思考过程（需 --thinking）
+# MIMO_SHOW_TOOL_USE=off         # 工具调用（读写文件、执行命令等）
+# MIMO_SHOW_STEP_START=off       # 步骤开始
+# MIMO_SHOW_STEP_FINISH=off      # 步骤结束（含 token/cost 统计）
 ```
 
 ### 启动时的自检顺序
@@ -418,6 +426,35 @@ function sanitizeError(raw: string): string {
 - `MIMO_SKIP_PERMISSIONS=false`（默认）：mimo CLI 在执行命令/写文件前会要求确认
 - `MIMO_SKIP_PERMISSIONS=true`：跳过确认，CLI 使用 `--dangerously-skip-permissions` 标志
 - 启动时若 `skipPermissions=true`，控制台会打印 `YES (dangerous)` 警告
+
+### 4.4 事件可见性控制
+
+Bot 可以通过环境变量控制 MiMoCode 的中间消息是否显示在 Telegram 中。每种事件类型独立配置：
+
+| 事件类型 | 环境变量 | 默认值 | 描述 |
+|----------|---------|--------|------|
+| 文本回复 | `MIMO_SHOW_TEXT` | `full` | 最终文本内容，推荐保持 `full` |
+| 思考过程 | `MIMO_SHOW_REASONING` | `off` | `--thinking` 模式下的推理过程 |
+| 工具调用 | `MIMO_SHOW_TOOL_USE` | `off` | 读写文件、执行命令等操作 |
+| 步骤开始 | `MIMO_SHOW_STEP_START` | `off` | 每个推理步骤的开始事件 |
+| 步骤结束 | `MIMO_SHOW_STEP_FINISH` | `off` | 含 token 用量、cost 统计 |
+
+每个变量可选值：
+
+| 值 | 行为 |
+|----|------|
+| `full` | 发送该事件的完整内容 |
+| `brief` | 发送单行摘要（如 `🔧 bash: python3 hello.py`） |
+| `hint` | 编辑占位符为简短提示（如 `🔧 正在执行: python3 hello.py`），不发送实际内容 |
+| `off` | 完全静默 |
+
+**推荐配置**（长时间任务时观察进度）：
+
+```bash
+MIMO_SHOW_TEXT=full
+MIMO_SHOW_TOOL_USE=hint
+MIMO_SHOW_STEP_FINISH=hint
+```
 
 ---
 

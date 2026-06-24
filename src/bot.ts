@@ -1,6 +1,5 @@
 import { Bot, type Context, InlineKeyboard, InputFile } from "grammy";
-import type { Config } from "./config.js";
-import { isAllowed } from "./config.js";
+import { isAllowed, type Config, type Verbosity } from "./config.js";
 import {
   formatLong,
   parseJsonSafe,
@@ -24,6 +23,127 @@ export function sanitizeError(raw: string): string {
   clean = clean.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "");
   if (clean.length > 100) clean = `${clean.slice(0, 100)}...`;
   return clean || "Unknown error";
+}
+
+const eventVerbosityKey: Record<string, keyof Config> = {
+  text: "showText",
+  reasoning: "showReasoning",
+  tool_use: "showToolUse",
+  step_start: "showStepStart",
+  step_finish: "showStepFinish",
+};
+
+function getVerbosity(evType: string, cfg: Config): Verbosity {
+  const key = eventVerbosityKey[evType];
+  if (!key) return "off";
+  return cfg[key] as Verbosity;
+}
+
+function hintIcon(evType: string): string {
+  switch (evType) {
+    case "reasoning": return "💭";
+    case "tool_use": return "🔧";
+    case "step_start": return "⟳";
+    case "step_finish": return "✓";
+    default: return "⏳";
+  }
+}
+
+function formatEventHint(event: Record<string, unknown>): string {
+  const type = event.type as string;
+  const part = event.part as Record<string, unknown> | undefined;
+  switch (type) {
+    case "reasoning":
+      return "💭 正在思考...";
+    case "tool_use": {
+      const tool = part?.tool as string ?? "";
+      const state = part?.state as Record<string, unknown> | undefined;
+      const title = state?.title as string ?? "";
+      const inp = state?.input as Record<string, unknown> | undefined;
+      const cmd = inp?.command as string ?? inp?.description as string ?? "";
+      return `🔧 ${tool}: ${(title || cmd).slice(0, 80)}`;
+    }
+    case "step_start":
+      return "⟳ 正在处理...";
+    case "step_finish": {
+      const tokens = part?.tokens as Record<string, number> | undefined;
+      const reason = part?.reason as string ?? "";
+      const cost = part?.cost as number | undefined;
+      let extra = "";
+      if (tokens) extra += ` ${tokens.total ?? 0}t`;
+      if (cost != null) extra += ` $${cost.toFixed(4)}`;
+      return `✓ 步骤完成 (${reason}${extra})`;
+    }
+    default:
+      return "⏳ 处理中...";
+  }
+}
+
+function formatEventBrief(event: Record<string, unknown>): string {
+  const type = event.type as string;
+  const part = event.part as Record<string, unknown> | undefined;
+  switch (type) {
+    case "reasoning": {
+      const text = (part?.text as string) ?? "";
+      const firstLine = text.split("\n")[0] ?? "";
+      return `💭 ${firstLine.slice(0, 200)}`;
+    }
+    case "tool_use": {
+      const tool = part?.tool as string ?? "";
+      const state = part?.state as Record<string, unknown> | undefined;
+      const title = state?.title as string ?? "";
+      const inp = state?.input as Record<string, unknown> | undefined;
+      const cmd = inp?.command as string ?? inp?.description as string ?? "";
+      return `🔧 ${tool}: ${(title || cmd).slice(0, 200)}`;
+    }
+    case "step_start":
+      return "⟳ step start";
+    case "step_finish": {
+      const tokens = part?.tokens as Record<string, number> | undefined;
+      const reason = part?.reason as string ?? "";
+      if (tokens) return `✓ step finish (${reason}, ${tokens.total ?? 0} tokens)`;
+      return `✓ step finish (${reason})`;
+    }
+    default:
+      return `${type}`;
+  }
+}
+
+function formatEventFull(event: Record<string, unknown>): string {
+  const type = event.type as string;
+  const part = event.part as Record<string, unknown> | undefined;
+  switch (type) {
+    case "reasoning": {
+      const text = (part?.text as string) ?? "";
+      return `💭 思考:\n${text}`;
+    }
+    case "tool_use": {
+      const tool = part?.tool as string ?? "";
+      const state = part?.state as Record<string, unknown> | undefined;
+      const inp = state?.input as Record<string, unknown> | undefined;
+      const output = (state?.output as string) ?? "";
+      const lines = [`🔧 ${tool}`];
+      const cmd = inp?.command as string | undefined;
+      const desc = inp?.description as string | undefined;
+      if (cmd) lines.push(`  command: ${cmd}`);
+      if (desc && desc !== cmd) lines.push(`  description: ${desc}`);
+      if (output) lines.push(`  output: ${output.slice(0, 500)}`);
+      return lines.join("\n");
+    }
+    case "step_start":
+      return "⟳ step start";
+    case "step_finish": {
+      const tokens = part?.tokens as Record<string, number> | undefined;
+      const reason = part?.reason as string ?? "";
+      const cost = part?.cost as number | undefined;
+      if (tokens) {
+        return `✓ step finish\n  reason: ${reason}\n  tokens: ${tokens.total ?? 0} (in:${tokens.input ?? 0} out:${tokens.output ?? 0})${cost != null ? ` cost:$${cost.toFixed(6)}` : ""}`;
+      }
+      return `✓ step finish (${reason})`;
+    }
+    default:
+      return `${type}: ${JSON.stringify(event).slice(0, 500)}`;
+  }
 }
 
 export function createBot(config: Config) {
@@ -87,14 +207,62 @@ export function createBot(config: Config) {
     const startTime = Date.now();
     try {
       const sent = await ctx.reply(opts.placeholder);
-      const result = await mimo.sendMessage(chatId, text, opts.mimoOpts);
+      let hintMsgId = sent.message_id;
+
+      const onEvent = (event: Record<string, unknown>) => {
+        const evType = event.type as string | undefined;
+        if (!evType) return;
+        const v = getVerbosity(evType, config);
+        if (v === "off") return;
+        if (evType === "text") {
+          // text events are accumulated and sent at the end;
+          // only handle non-full/hint verbosity for incremental text preview
+          if (v === "brief") {
+            const part = event.part as { text?: string } | undefined;
+            const firstLine = (part?.text ?? "").split("\n")[0] ?? "";
+            if (firstLine) {
+              bot.api.sendMessage(chatId, firstLine.slice(0, 500)).catch(() => {});
+            }
+          } else if (v === "hint") {
+            bot.api.editMessageText(chatId, hintMsgId, hintIcon(evType) + " 正在回复...").catch(() => {});
+          }
+          // "full": text is handled at the end by sendResult
+          return;
+        }
+        if (v === "hint") {
+          bot.api.editMessageText(chatId, hintMsgId, formatEventHint(event)).catch(() => {});
+        } else if (v === "brief") {
+          bot.api.sendMessage(chatId, formatEventBrief(event)).catch(() => {});
+        } else if (v === "full") {
+          bot.api.sendMessage(chatId, formatEventFull(event)).catch(() => {});
+        }
+      };
+
+      const mergedOpts: SendMessageOpts = {
+        ...opts.mimoOpts,
+        onEvent,
+      };
+      const result = await mimo.sendMessage(chatId, text, mergedOpts);
+      if (config.showText === "off" || (config.showText === "hint" && !result.content)) {
+        await bot.api.deleteMessage(chatId, sent.message_id).catch(() => {});
+        return;
+      }
       if (!result.content) {
         await bot.api
           .editMessageText(chatId, sent.message_id, "(empty)")
           .catch(() => {});
         return;
       }
-      await sendResult(chatId, sent.message_id, result.content);
+      if (config.showText === "full") {
+        await sendResult(chatId, sent.message_id, result.content);
+      } else if (config.showText === "brief") {
+        const firstLine = result.content.split("\n")[0] ?? result.content;
+        await bot.api.editMessageText(chatId, sent.message_id, firstLine.slice(0, 500))
+          .catch(() => {});
+      } else if (config.showText === "hint") {
+        await bot.api.editMessageText(chatId, sent.message_id, "✓ 已回复")
+          .catch(() => {});
+      }
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       console.log(
         `[${new Date().toISOString()}] ${opts.logPrefix} chat=${chatId} time=${elapsed}s`,

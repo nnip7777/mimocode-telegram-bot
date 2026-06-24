@@ -71,6 +71,11 @@ describe("isAllowed", () => {
     allowedUserIds: ["111", "222"],
     mimoWorkDir: "/tmp",
     skipPermissions: false,
+    showText: "full",
+    showReasoning: "off",
+    showToolUse: "off",
+    showStepStart: "off",
+    showStepFinish: "off",
   };
 
   it("returns true for valid user ID", () => {

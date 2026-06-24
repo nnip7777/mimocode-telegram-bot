@@ -11,6 +11,7 @@ export type SendMessageOpts = {
   agent?: string;
   thinking?: boolean;
   variant?: string;
+  onEvent?: (event: Record<string, unknown>) => void;
 };
 
 export class MimoClient {
@@ -82,6 +83,7 @@ export class MimoClient {
     args: string[],
     chatId: string,
     onStdout: (chunk: Buffer) => void,
+    onEvent?: (event: Record<string, unknown>) => void,
   ): Promise<{ stderr: string; code: number }> {
     return new Promise((resolve, reject) => {
       const proc = this.spawnProcess(args);
@@ -192,6 +194,7 @@ export class MimoClient {
           for (const line of lines) {
             try {
               const event = JSON.parse(line) as Record<string, unknown>;
+              if (opts?.onEvent) opts.onEvent(event);
               if (event.type === "text") {
                 const part = event.part as { text?: string } | undefined;
                 if (part?.text) {

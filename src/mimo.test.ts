@@ -7,6 +7,11 @@ const baseConfig: Config = {
   allowedUserIds: ["111"],
   mimoWorkDir: "/tmp",
   skipPermissions: false,
+  showText: "full",
+  showReasoning: "off",
+  showToolUse: "off",
+  showStepStart: "off",
+  showStepFinish: "off",
 };
 
 // ── session management ────────────────────────────────
