@@ -23,10 +23,12 @@ Telegram 用户 ──消息──▶ Telegram API ──Webhook──▶ grammy
 | 机制 | 实现 |
 |------|------|
 | 进程模型 | 每次消息 `spawn("mimo", ["run", ...])`，流式读取 stdout |
+| 进度指示 | `sendChatAction("typing")` 每 4s 刷新，任务结束自动消失 |
 | 会话绑定 | `Map<chatId → sessionId>`，每个 Telegram 私聊独立维护 |
 | 并发控制 | `Set<chatId>`，同一 chat 同时只能有一个任务在跑 |
 | 内容分片 | 3500 字符为界，换行优先切分，超出 Telegram 消息限制自动拆分 |
-| 超时控制 | 无 bot 级超时；MiMoCode 自行管理 shell 执行超时，用户通过 `/cancel` 手动终止 |
+| 超时控制 | 无 bot 级超时；MiMoCode 自行管理，用户通过 `/cancel` 手动终止 |
+| 消息模式 | 所有事件以独立新消息发送，不做消息编辑替换 |
 | 会话恢复 | `Session not found` 时自动删除旧 session、重试新 session |
 
 ### 状态：完全内存化，不持久
@@ -61,7 +63,7 @@ MIMO_SKIP_PERMISSIONS=true             # 跳过权限确认（危险，慎用）
 1. 检查 `.env` 是否存在，不存在则从 `.env.example` 复制
 2. 解析 `TELEGRAM_BOT_TOKEN`（缺失抛异常）
 3. 解析 `TELEGRAM_ALLOWED_USER_ID`（为空则抛异常，拒绝启动）
-4. 解析 `MIMO_RUN_TIMEOUT_MS`（非正数抛异常）
+4. 解析各事件可见性环境变量（无效值自动 fallback 为默认值）
 5. `mimo --version` ping 检测 MiMoCode CLI 是否可用
 6. 注册 16 个 Telegram bot 命令
 7. 启动 grammy bot 长轮询
@@ -104,10 +106,10 @@ MIMO_SKIP_PERMISSIONS=true             # 跳过权限确认（危险，慎用）
   → 检查白名单
   → 检查是否纯数字（会话切换逻辑，见 3.6）
   → 检查 chat 是否有正在运行的任务（有则提示 "Task running. Wait or /cancel."）
-  → 发送占位符 "..."
+  → 发送 typing 指示器（每 4 秒刷新，保持 "正在输入..." 状态）
   → spawn("mimo", ["run", "fix the bug...", "--format", "json", ...])
-  → 流式读取 stdout JSON 行，拼接所有 type=text 事件
-  → 完成后编辑占位符消息为结果（首块），超长则追加新消息
+  → 流式读取 stdout JSON 行，根据事件类型和可见性配置实时发送进度消息
+  → 完成后 typing 指示器自动消失，发送最终文本回复（新消息，在底部）
   → 记录日志: [ISO时间] chat chat=xxx time=x.xs
 ```
 
@@ -133,16 +135,21 @@ mimo run "<消息>" --format json
 {"sessionID": "abc123..."}
 ```
 
-Bot 仅关心两类字段：
-- `type === "text"` 且 `part.text` 存在 → 拼接为最终回复内容
+Bot 解析所有事件类型并根据可见性配置处理：
+- `type === "text"` 且 `part.text` 存在 → 累积为最终回复（`showText=full` 时完整发送，`brief` 发送首行，`hint` 仅提示）
+- `type === "reasoning"` → 思考过程，按 `showReasoning` 显示
+- `type === "tool_use"` → 工具调用（读写文件、执行命令等），按 `showToolUse` 显示
+- `type === "step_start"` → 步骤开始，按 `showStepStart` 显示
+- `type === "step_finish"` → 步骤结束（含 token/cost），按 `showStepFinish` 显示
 - `sessionID` 或 `sessionId` 字段 → 记录为新会话 ID
+
+所有事件以独立新消息发送（`sendMessage`），不做消息编辑替换。
 
 **消息分片策略**（`format.ts:84-112`）:
 
 - 单条消息 ≤ 3500 字符：直接发送
 - 超过 3500 字符：按 `\n` 切分，找不到 `\n` 则按空格，再找不到则硬切
-- 首块替换占位符（`editMessageText`），后续块发新消息（`sendMessage`）
-- 每块尝试 `parse_mode: "HTML"`，失败则降级为纯文本（去除 HTML 标签后重发）
+- 全部分片作为新消息发送（`sendMessage`），不再编辑已有消息
 
 ### 3.4 `/new` — 新建会话
 
@@ -445,7 +452,7 @@ Bot 可以通过环境变量控制 MiMoCode 的中间消息是否显示在 Teleg
 |----|------|
 | `full` | 发送该事件的完整内容 |
 | `brief` | 发送单行摘要（如 `🔧 bash: python3 hello.py`） |
-| `hint` | 编辑占位符为简短提示（如 `🔧 正在执行: python3 hello.py`），不发送实际内容 |
+| `hint` | 发送简短提示消息（如 `🔧 bash: python3 hello.py`），不发送实际内容 |
 | `off` | 完全静默 |
 
 **推荐配置**（长时间任务时观察进度）：
@@ -551,14 +558,15 @@ Bot:  MiMoCode Bot v0.1.1
       [Status] [Sessions] [Models] [Stats] [New Session]
 
 用户: What's in this directory?
-Bot:  ... (占用位符先显示，完成后被替换为)
+Bot:  (typing 指示器显示，每条工具调用作为独立消息出现)
+      🔧 read: /home/pluto/app
       The directory contains:
       src/  - source code
       tests/ - test files
       ...
 
 用户: Explain the auth flow in src/auth.ts
-Bot:  ... (继续同一 session 上下文)
+Bot:  (继续同一 session 上下文)
       The auth flow works as follows...
 ```
 
@@ -575,7 +583,7 @@ Bot:  Model: default
 Bot:  Model → deepseek/deepseek-v4
 
 用户: Show me a python quicksort
-Bot:  ... (使用 deepseek-v4 处理)
+Bot:  (使用 deepseek-v4 处理)
 ```
 
 ### 场景 3：模式切换
@@ -592,7 +600,7 @@ Bot:  Agent: build
 Bot:  Agent → plan
 
 用户: Analyze the architecture of this project
-Bot:  ... (只读模式，不会修改任何文件)
+Bot:  (只读模式，不会修改任何文件)
 ```
 
 ### 场景 4：会话管理
@@ -602,7 +610,7 @@ Bot:  ... (只读模式，不会修改任何文件)
 Bot:  Session cleared. Send a new message to start fresh.
 
 用户: Add a login form component
-Bot:  ... (新 session 中工作)
+Bot:  (新 session 中工作)
       创建了 src/components/LoginForm.tsx ...
 
 用户: /sessions
@@ -621,14 +629,16 @@ Bot:  Switched to session:
       Fix authentication bug
 
 用户: Can you also add a password reset page?
-Bot:  ... (在之前的 auth bug fix session 中继续)
+Bot:  (在之前的 auth bug fix session 中继续)
 ```
 
 ### 场景 5：Compose 工作流
 
 ```
 用户: /compose Build a REST API with user CRUD
-Bot:  ⏳ Compose: plan → code → test → review...
+Bot:  (typing 指示器显示，逐步发送进度消息)
+      🔧 write: /app/api/users.py
+      🔧 bash: python3 test_users.py
       (plan 阶段) I'll plan the API structure...
       (code 阶段) Creating controllers, routes...
       (test 阶段) Writing integration tests...
@@ -641,13 +651,13 @@ Bot:  ⏳ Compose: plan → code → test → review...
 
 ```
 用户: Refactor the entire codebase to use async/await
-Bot:  ... (正在运行，可能需要很长时间)
+Bot:  (typing 指示器显示，正在处理)
 
 用户: /cancel
 Bot:  Task cancelled.
 
 用户: That's enough, just refactor src/utils.ts
-Bot:  ... (新任务，不受之前取消影响)
+Bot:  (新任务，不受之前取消影响)
 ```
 
 ### 场景 7：导出与删除
@@ -669,7 +679,7 @@ Bot:  Sessions (2)
 
 ```
 用户: A very long and complex task...
-Bot:  ... (处理中)
+Bot:  (处理中，typing 指示器 + 进度消息)
 
 用户: Another task  ← 在上一个完成前发送
 Bot:  Task running. Wait or /cancel.
@@ -678,7 +688,7 @@ Bot:  Task running. Wait or /cancel.
 Bot:  Task cancelled.
 
 用户: Now do this other task instead
-Bot:  ... (正常执行)
+Bot:  (正常执行)
 ```
 
 ---
@@ -730,6 +740,7 @@ pm2 monit                         # CPU/内存监控面板
 | `agent` | `string` | 覆盖 agent | `/use <agent>` 或 `/compose`（强制 compose） |
 | `thinking` | `boolean` | 启用思考模式 | 代码预留，目前无 Telegram 入口 |
 | `variant` | `string` | 采样策略变体 | `/max` 命令（设为 "max"） |
+| `onEvent` | `function` | 事件回调（由 bot 内部注入） | 用于实时发送进度消息 |
 
 ### 内部 CLI 调用汇总
 
