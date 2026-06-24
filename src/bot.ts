@@ -182,7 +182,6 @@ export function createBot(config: Config) {
     const startTime = Date.now();
     try {
       const sent = await ctx.reply(opts.placeholder);
-      let hintMsgId = sent.message_id;
 
       const onEvent = (event: Record<string, unknown>) => {
         const evType = event.type as string | undefined;
@@ -191,7 +190,7 @@ export function createBot(config: Config) {
         if (v === "off") return;
         if (evType === "text") {
           // text events are accumulated and sent at the end;
-          // only handle non-full/hint verbosity for incremental text preview
+          // only handle non-full verbosity for incremental text preview
           if (v === "brief") {
             const part = event.part as { text?: string } | undefined;
             const firstLine = (part?.text ?? "").split("\n")[0] ?? "";
@@ -199,13 +198,13 @@ export function createBot(config: Config) {
               bot.api.sendMessage(chatId, firstLine.slice(0, 500)).catch(() => {});
             }
           } else if (v === "hint") {
-            bot.api.editMessageText(chatId, hintMsgId, hintIcon(evType) + " 正在回复...").catch(() => {});
+            bot.api.sendMessage(chatId, hintIcon(evType) + " 回复中...").catch(() => {});
           }
           // "full": text is handled at the end by sendLong
           return;
         }
         if (v === "hint") {
-          bot.api.editMessageText(chatId, hintMsgId, formatEventHint(event)).catch(() => {});
+          bot.api.sendMessage(chatId, formatEventHint(event)).catch(() => {});
         } else if (v === "brief") {
           bot.api.sendMessage(chatId, formatEventBrief(event)).catch(() => {});
         } else if (v === "full") {
