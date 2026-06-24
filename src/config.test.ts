@@ -71,7 +71,6 @@ describe("isAllowed", () => {
     allowedUserIds: ["111", "222"],
     mimoWorkDir: "/tmp",
     skipPermissions: false,
-    runTimeoutMs: 120_000,
   };
 
   it("returns true for valid user ID", () => {

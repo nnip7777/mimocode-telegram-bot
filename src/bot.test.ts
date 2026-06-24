@@ -9,7 +9,6 @@ const baseConfig: Config = {
   allowedUserIds: ["111", "222"],
   mimoWorkDir: "/tmp",
   skipPermissions: false,
-  runTimeoutMs: 120_000,
 };
 
 describe("checkAuth", () => {

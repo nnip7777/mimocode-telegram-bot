@@ -18,7 +18,6 @@ export type Config = {
   readonly mimoWorkDir: string;
   readonly mimoApiUrl?: string;
   readonly skipPermissions: boolean;
-  readonly runTimeoutMs: number;
 };
 
 export function loadConfig(): Config {
@@ -34,21 +33,12 @@ export function loadConfig(): Config {
     );
   }
 
-  const runTimeoutMsRaw = process.env.MIMO_RUN_TIMEOUT_MS;
-  const runTimeoutMs = runTimeoutMsRaw ? Number(runTimeoutMsRaw) : 120_000;
-  if (Number.isNaN(runTimeoutMs) || runTimeoutMs <= 0) {
-    throw new Error(
-      "MIMO_RUN_TIMEOUT_MS must be a positive number (milliseconds)",
-    );
-  }
-
   return {
     telegramToken: env("TELEGRAM_BOT_TOKEN"),
     allowedUserIds,
     mimoWorkDir: env("MIMO_WORK_DIR", resolve(process.cwd())),
     mimoApiUrl: process.env.MIMO_API_URL || undefined,
     skipPermissions: envBool("MIMO_SKIP_PERMISSIONS", false),
-    runTimeoutMs,
   };
 }
 

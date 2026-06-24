@@ -17,7 +17,6 @@ export class MimoClient {
   private readonly workDir: string;
   private readonly mimoApiUrl?: string;
   private readonly skipPermissions: boolean;
-  private readonly runTimeoutMs: number;
   private sessions: Map<string, string> = new Map();
   private processes: Map<string, ChildProcess> = new Map();
   private chatModels: Map<string, string> = new Map();
@@ -28,7 +27,6 @@ export class MimoClient {
     this.workDir = config.mimoWorkDir;
     this.mimoApiUrl = config.mimoApiUrl;
     this.skipPermissions = config.skipPermissions;
-    this.runTimeoutMs = config.runTimeoutMs;
   }
 
   clearSession(chatId: string): void {
@@ -84,53 +82,24 @@ export class MimoClient {
     args: string[],
     chatId: string,
     onStdout: (chunk: Buffer) => void,
-    opts?: { timeoutMs?: number },
   ): Promise<{ stderr: string; code: number }> {
     return new Promise((resolve, reject) => {
       const proc = this.spawnProcess(args);
       this.processes.set(chatId, proc);
 
       let stderr = "";
-      const timeout = opts?.timeoutMs ?? this.runTimeoutMs;
 
-      let timer: ReturnType<typeof setTimeout>;
-      let timedOut = false;
-      const resetTimer = () => {
-        if (timedOut) return;
-        clearTimeout(timer);
-        timer = setTimeout(() => {
-          timedOut = true;
-          proc.kill("SIGTERM");
-          this.processes.delete(chatId);
-          reject(new Error(`mimo timed out after ${timeout}ms of inactivity`));
-        }, timeout);
-      };
-      resetTimer();
-
-      const originalOnStdout = onStdout;
-      proc.stdout?.on("data", (chunk: Buffer) => {
-        resetTimer();
-        originalOnStdout(chunk);
-      });
-      proc.stderr?.on("data", (c: Buffer) => {
-        resetTimer();
-        stderr += c.toString();
-      });
+      proc.stdout?.on("data", onStdout);
+      proc.stderr?.on("data", (c: Buffer) => (stderr += c.toString()));
 
       proc.on("close", (code) => {
-        clearTimeout(timer);
-        if (!timedOut) {
-          this.processes.delete(chatId);
-          resolve({ stderr, code: code ?? -1 });
-        }
+        this.processes.delete(chatId);
+        resolve({ stderr, code: code ?? -1 });
       });
 
       proc.on("error", (err) => {
-        clearTimeout(timer);
-        if (!timedOut) {
-          this.processes.delete(chatId);
-          reject(new Error(`Failed to spawn mimo: ${err.message}`));
-        }
+        this.processes.delete(chatId);
+        reject(new Error(`Failed to spawn mimo: ${err.message}`));
       });
     });
   }
@@ -240,7 +209,6 @@ export class MimoClient {
             }
           }
         },
-        { timeoutMs: this.runTimeoutMs },
       );
 
       if (code !== 0 && !fullContent) {

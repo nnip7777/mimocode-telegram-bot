@@ -26,7 +26,7 @@ Telegram 用户 ──消息──▶ Telegram API ──Webhook──▶ grammy
 | 会话绑定 | `Map<chatId → sessionId>`，每个 Telegram 私聊独立维护 |
 | 并发控制 | `Set<chatId>`，同一 chat 同时只能有一个任务在跑 |
 | 内容分片 | 3500 字符为界，换行优先切分，超出 Telegram 消息限制自动拆分 |
-| 超时控制 | 空闲超时：每次 stdout/stderr 输出重置计时器，无输出超 `MIMO_RUN_TIMEOUT_MS` 则 SIGTERM 杀子进程 |
+| 超时控制 | 无 bot 级超时；MiMoCode 自行管理 shell 执行超时，用户通过 `/cancel` 手动终止 |
 | 会话恢复 | `Session not found` 时自动删除旧 session、重试新 session |
 
 ### 状态：完全内存化，不持久
@@ -46,7 +46,6 @@ TELEGRAM_ALLOWED_USER_ID=111111,222222 # 逗号分隔的白名单，空则拒绝
 MIMO_WORK_DIR=/path/to/project         # mimo CLI 的工作目录（默认当前目录）
 MIMO_API_URL=http://127.0.0.1:4096     # 连接已有 MiMoCode 服务（不填则自动启动）
 MIMO_SKIP_PERMISSIONS=true             # 跳过权限确认（危险，慎用）
-MIMO_RUN_TIMEOUT_MS=300000             # 空闲超时毫秒：每次输出重置计时器（默认 120000 = 2分钟）
 ```
 
 ### 启动时的自检顺序
@@ -465,7 +464,7 @@ function sanitizeError(raw: string): string {
 
 | 操作 | 默认超时 | 配置 | 行为 |
 |------|---------|------|------|
-| 普通聊天 `/compose` `/max` | 120s (2分钟) | `MIMO_RUN_TIMEOUT_MS` | **空闲超时**：每次 stdout/stderr 输出重置计时器；仅当无输出超过时限才杀进程 |
+| 普通聊天 `/compose` `/max` | 无 | — | 无 bot 级超时；MiMoCode 自行管理，用户 `/cancel` 终止 |
 | `mimo exec()` 通用调用 | 30s | 各命令可覆盖 | 墙钟超时（短查询） |
 | `/model` 列表查询 | 10s | 硬编码 |
 | `/models` 查询 | 10s | 硬编码 |
