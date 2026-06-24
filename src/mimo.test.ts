@@ -79,3 +79,17 @@ describe("MimoClient.abort", () => {
   });
 });
 
+// ── workdir management ────────────────────────────────
+
+describe("MimoClient workdir management", () => {
+  it("getWorkDir returns initial config workDir", () => {
+    const client = new MimoClient(baseConfig);
+    expect(client.getWorkDir()).toBe("/tmp");
+  });
+
+  it("setWorkDir dynamically updates the workDir", () => {
+    const client = new MimoClient(baseConfig);
+    client.setWorkDir("/home/pluto");
+    expect(client.getWorkDir()).toBe("/home/pluto");
+  });
+});

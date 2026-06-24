@@ -1,5 +1,7 @@
+import fs from "node:fs";
+import path from "node:path";
 import { Bot, type Context, InlineKeyboard, InputFile } from "grammy";
-import { isAllowed, type Config, type Verbosity } from "./config.js";
+import { type Config, isAllowed, type Verbosity } from "./config.js";
 import {
   formatLong,
   parseJsonSafe,
@@ -41,11 +43,16 @@ function getVerbosity(evType: string, cfg: Config): Verbosity {
 
 function hintIcon(evType: string): string {
   switch (evType) {
-    case "reasoning": return "💭";
-    case "tool_use": return "🔧";
-    case "step_start": return "⟳";
-    case "step_finish": return "✓";
-    default: return "⏳";
+    case "reasoning":
+      return "💭";
+    case "tool_use":
+      return "🔧";
+    case "step_start":
+      return "⟳";
+    case "step_finish":
+      return "✓";
+    default:
+      return "⏳";
   }
 }
 
@@ -56,18 +63,19 @@ function formatEventHint(event: Record<string, unknown>): string {
     case "reasoning":
       return "💭 正在思考...";
     case "tool_use": {
-      const tool = part?.tool as string ?? "";
+      const tool = (part?.tool as string) ?? "";
       const state = part?.state as Record<string, unknown> | undefined;
-      const title = state?.title as string ?? "";
+      const title = (state?.title as string) ?? "";
       const inp = state?.input as Record<string, unknown> | undefined;
-      const cmd = inp?.command as string ?? inp?.description as string ?? "";
+      const cmd =
+        (inp?.command as string) ?? (inp?.description as string) ?? "";
       return `🔧 ${tool}: ${(title || cmd).slice(0, 80)}`;
     }
     case "step_start":
       return "⟳ 正在处理...";
     case "step_finish": {
       const tokens = part?.tokens as Record<string, number> | undefined;
-      const reason = part?.reason as string ?? "";
+      const reason = (part?.reason as string) ?? "";
       const cost = part?.cost as number | undefined;
       let extra = "";
       if (tokens) extra += ` ${tokens.total ?? 0}t`;
@@ -89,19 +97,21 @@ function formatEventBrief(event: Record<string, unknown>): string {
       return `💭 ${firstLine.slice(0, 200)}`;
     }
     case "tool_use": {
-      const tool = part?.tool as string ?? "";
+      const tool = (part?.tool as string) ?? "";
       const state = part?.state as Record<string, unknown> | undefined;
-      const title = state?.title as string ?? "";
+      const title = (state?.title as string) ?? "";
       const inp = state?.input as Record<string, unknown> | undefined;
-      const cmd = inp?.command as string ?? inp?.description as string ?? "";
+      const cmd =
+        (inp?.command as string) ?? (inp?.description as string) ?? "";
       return `🔧 ${tool}: ${(title || cmd).slice(0, 200)}`;
     }
     case "step_start":
       return "⟳ step start";
     case "step_finish": {
       const tokens = part?.tokens as Record<string, number> | undefined;
-      const reason = part?.reason as string ?? "";
-      if (tokens) return `✓ step finish (${reason}, ${tokens.total ?? 0} tokens)`;
+      const reason = (part?.reason as string) ?? "";
+      if (tokens)
+        return `✓ step finish (${reason}, ${tokens.total ?? 0} tokens)`;
       return `✓ step finish (${reason})`;
     }
     default:
@@ -118,7 +128,7 @@ function formatEventFull(event: Record<string, unknown>): string {
       return `💭 思考:\n${text}`;
     }
     case "tool_use": {
-      const tool = part?.tool as string ?? "";
+      const tool = (part?.tool as string) ?? "";
       const state = part?.state as Record<string, unknown> | undefined;
       const inp = state?.input as Record<string, unknown> | undefined;
       const output = (state?.output as string) ?? "";
@@ -134,7 +144,7 @@ function formatEventFull(event: Record<string, unknown>): string {
       return "⟳ step start";
     case "step_finish": {
       const tokens = part?.tokens as Record<string, number> | undefined;
-      const reason = part?.reason as string ?? "";
+      const reason = (part?.reason as string) ?? "";
       const cost = part?.cost as number | undefined;
       if (tokens) {
         return `✓ step finish\n  reason: ${reason}\n  tokens: ${tokens.total ?? 0} (in:${tokens.input ?? 0} out:${tokens.output ?? 0})${cost != null ? ` cost:$${cost.toFixed(6)}` : ""}`;
@@ -154,6 +164,10 @@ export function createBot(config: Config) {
     string,
     { sessions: Array<{ id: string; title: string }>; ts: number }
   >();
+  const browsingPaths = new Map<string, string>();
+  const browsingSubdirs = new Map<string, string[]>();
+  const waitingForFolderName = new Map<string, string>();
+  const pendingFolderName = new Map<string, string>();
 
   async function sendLong(chatId: string, text: string) {
     const chunks = formatLong(text);
@@ -188,7 +202,6 @@ export function createBot(config: Config) {
     bot.api.sendChatAction(chatId, "typing").catch(() => {});
 
     try {
-
       const onEvent = (event: Record<string, unknown>) => {
         const evType = event.type as string | undefined;
         if (!evType) return;
@@ -199,10 +212,14 @@ export function createBot(config: Config) {
             const part = event.part as { text?: string } | undefined;
             const firstLine = (part?.text ?? "").split("\n")[0] ?? "";
             if (firstLine) {
-              bot.api.sendMessage(chatId, firstLine.slice(0, 500)).catch(() => {});
+              bot.api
+                .sendMessage(chatId, firstLine.slice(0, 500))
+                .catch(() => {});
             }
           } else if (v === "hint") {
-            bot.api.sendMessage(chatId, hintIcon(evType) + " 回复中...").catch(() => {});
+            bot.api
+              .sendMessage(chatId, hintIcon(evType) + " 回复中...")
+              .catch(() => {});
           }
           return;
         }
@@ -228,7 +245,8 @@ export function createBot(config: Config) {
         await sendLong(chatId, stripSystemTags(result.content));
       } else if (config.showText === "brief") {
         const firstLine = result.content.split("\n")[0] ?? result.content;
-        await bot.api.sendMessage(chatId, firstLine.slice(0, 500))
+        await bot.api
+          .sendMessage(chatId, firstLine.slice(0, 500))
           .catch(() => {});
       } else if (config.showText === "hint") {
         await bot.api.sendMessage(chatId, "✓ 已回复").catch(() => {});
@@ -247,6 +265,81 @@ export function createBot(config: Config) {
       processing.delete(chatId);
     }
   }
+
+  async function renderExplorer(ctx: Context, chatId: string, isEdit = false) {
+    const current = browsingPaths.get(chatId) ?? mimo.getWorkDir();
+    let subdirs: string[] = [];
+    let errMessage = "";
+    try {
+      if (fs.existsSync(current)) {
+        const entries = fs.readdirSync(current, { withFileTypes: true });
+        subdirs = entries
+          .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+          .map((e) => e.name)
+          .sort();
+      } else {
+        errMessage = `Directory does not exist: <code>${current}</code>`;
+      }
+    } catch (err) {
+      errMessage = `Error reading directory: ${(err as Error).message}`;
+    }
+
+    browsingSubdirs.set(chatId, subdirs);
+
+    const kb = new InlineKeyboard();
+
+    if (subdirs.length > 0) {
+      for (let i = 0; i < subdirs.length; i++) {
+        kb.text(`📁 ${subdirs[i]}`, `wd:nav:${i}`);
+        if (i % 2 === 1) kb.row();
+      }
+      if (subdirs.length % 2 !== 0) kb.row();
+    } else if (!errMessage) {
+      errMessage = "<i>(No subdirectories found)</i>";
+    }
+
+    const isRoot = path.resolve(current) === path.resolve("/");
+    if (!isRoot) {
+      kb.text("⬅️ Up", "wd:nav:up");
+    }
+    kb.text("➕ Create New Folder Here", "wd:newfolder").row();
+    kb.text("✅ Select This", "wd:sel");
+    kb.text("❌ Close", "wd:close");
+
+    const messageText =
+      `<b>📁 Workspace Explorer</b>\n\n` +
+      `Current Path:\n<code>${current}</code>\n\n` +
+      (errMessage ? `${errMessage}\n\n` : "") +
+      `Select a folder below to navigate, then click <b>Select This</b> to confirm.`;
+
+    if (isEdit) {
+      try {
+        await ctx.editMessageText(messageText, {
+          parse_mode: "HTML",
+          reply_markup: kb,
+        });
+      } catch (err) {
+        console.error("Failed to edit explorer message:", err);
+      }
+    } else {
+      await ctx.reply(messageText, {
+        parse_mode: "HTML",
+        reply_markup: kb,
+      });
+    }
+  }
+
+  // ── /workdir ─────────────────────────────────────────
+  bot.command("workdir", async (ctx) => {
+    if (!checkAuth(ctx, config)) {
+      await ctx.reply("Access denied.");
+      return;
+    }
+    const chatId = String(ctx.chat.id);
+    const current = mimo.getWorkDir();
+    browsingPaths.set(chatId, current);
+    await renderExplorer(ctx, chatId);
+  });
 
   function mainMenuKb(): InlineKeyboard {
     return new InlineKeyboard()
@@ -651,6 +744,49 @@ export function createBot(config: Config) {
       return;
     }
 
+    if (waitingForFolderName.has(chatId)) {
+      const parentPath = waitingForFolderName.get(chatId) as string;
+      const folderName = text.trim();
+
+      const isValid =
+        folderName.length > 0 &&
+        !/[/\\?%*:|"<>]/.test(folderName) &&
+        folderName !== "." &&
+        folderName !== "..";
+      if (!isValid) {
+        const cancelKb = new InlineKeyboard().text(
+          "🔙 Cancel",
+          "wd:mkdir:cancel",
+        );
+        await ctx.reply(
+          `❌ <b>Invalid folder name!</b>\n\n` +
+            `A folder name cannot contain slashes or special characters, and cannot be "." or "..".\n\n` +
+            `Please try again, or click <b>Cancel</b>:`,
+          { parse_mode: "HTML", reply_markup: cancelKb },
+        );
+        return;
+      }
+
+      pendingFolderName.set(chatId, folderName);
+
+      const confirmText =
+        `<b>❓ Confirm Directory Creation</b>\n\n` +
+        `Do you want to create a new folder named <code>${folderName}</code> inside:\n<code>${parentPath}</code>?\n\n` +
+        `Please click <b>Confirm</b> to create, <b>Don't Confirm</b> to enter a different name, or <b>Cancel</b> to abort.`;
+
+      const confirmKb = new InlineKeyboard()
+        .text("✅ Confirm", "wd:mkdir:yes")
+        .text("❌ Don't Confirm", "wd:mkdir:no")
+        .row()
+        .text("🔙 Cancel", "wd:mkdir:cancel");
+
+      await ctx.reply(confirmText, {
+        parse_mode: "HTML",
+        reply_markup: confirmKb,
+      });
+      return;
+    }
+
     const num = Number.parseInt(text, 10);
     if (num >= 1 && text === String(num)) {
       const entry = lastSessions.get(chatId);
@@ -667,6 +803,190 @@ export function createBot(config: Config) {
     }
 
     await runMimoCommand(ctx, text, { logPrefix: "chat" });
+  });
+
+  // ── callback_query handler ────────────────────────────
+  bot.on("callback_query:data", async (ctx) => {
+    if (!checkAuth(ctx, config)) {
+      await ctx.answerCallbackQuery({
+        text: "Access denied.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const chatId = String(ctx.chat?.id);
+    const data = ctx.callbackQuery.data;
+
+    if (data.startsWith("wd:")) {
+      const parts = data.split(":");
+      const action = parts[1];
+      const current = browsingPaths.get(chatId) ?? mimo.getWorkDir();
+
+      if (action === "close") {
+        await ctx.answerCallbackQuery();
+        browsingPaths.delete(chatId);
+        browsingSubdirs.delete(chatId);
+        try {
+          await ctx.deleteMessage();
+        } catch {
+          await ctx.editMessageText("<i>Explorer closed.</i>", {
+            parse_mode: "HTML",
+          });
+        }
+        return;
+      }
+
+      if (action === "newfolder") {
+        await ctx.answerCallbackQuery();
+        waitingForFolderName.set(chatId, current);
+        pendingFolderName.delete(chatId);
+
+        const promptText =
+          `<b>📝 Create New Folder Here</b>\n\n` +
+          `Parent Path:\n<code>${current}</code>\n\n` +
+          `Please reply with a valid folder name (e.g., <code>my-project</code>).`;
+
+        const cancelKb = new InlineKeyboard().text(
+          "🔙 Cancel",
+          "wd:mkdir:cancel",
+        );
+        try {
+          await ctx.editMessageText(promptText, {
+            parse_mode: "HTML",
+            reply_markup: cancelKb,
+          });
+        } catch {
+          await ctx.reply(promptText, {
+            parse_mode: "HTML",
+            reply_markup: cancelKb,
+          });
+        }
+        return;
+      }
+
+      if (action === "mkdir") {
+        const arg = parts[2];
+        const parentPath = waitingForFolderName.get(chatId);
+        const folderName = pendingFolderName.get(chatId);
+
+        if (arg === "cancel") {
+          await ctx.answerCallbackQuery();
+          waitingForFolderName.delete(chatId);
+          pendingFolderName.delete(chatId);
+          await renderExplorer(ctx, chatId, true);
+          return;
+        }
+
+        if (arg === "no") {
+          await ctx.answerCallbackQuery();
+          pendingFolderName.delete(chatId);
+          // Re-prompt folder name input
+          const promptText =
+            `<b>📝 Create New Folder Here</b>\n\n` +
+            `Parent Path:\n<code>${current}</code>\n\n` +
+            `Please reply with a valid folder name (e.g., <code>my-project</code>).`;
+
+          const cancelKb = new InlineKeyboard().text(
+            "🔙 Cancel",
+            "wd:mkdir:cancel",
+          );
+          try {
+            await ctx.editMessageText(promptText, {
+              parse_mode: "HTML",
+              reply_markup: cancelKb,
+            });
+          } catch {
+            await ctx.reply(promptText, {
+              parse_mode: "HTML",
+              reply_markup: cancelKb,
+            });
+          }
+          return;
+        }
+
+        if (arg === "yes") {
+          if (!parentPath || !folderName) {
+            await ctx.answerCallbackQuery({
+              text: "Session state missing.",
+              show_alert: true,
+            });
+            return;
+          }
+
+          const targetPath = path.resolve(parentPath, folderName);
+
+          try {
+            fs.mkdirSync(targetPath, { recursive: true });
+            await ctx.answerCallbackQuery({
+              text: `Folder created: ${folderName}`,
+            });
+
+            waitingForFolderName.delete(chatId);
+            pendingFolderName.delete(chatId);
+
+            // Update active browsing path to the newly created folder
+            browsingPaths.set(chatId, targetPath);
+            await renderExplorer(ctx, chatId, true);
+          } catch (err) {
+            await ctx.answerCallbackQuery({
+              text: `Failed to create folder: ${(err as Error).message}`,
+              show_alert: true,
+            });
+          }
+          return;
+        }
+      }
+
+      if (action === "sel") {
+        await ctx.answerCallbackQuery();
+        mimo.setWorkDir(current);
+        browsingPaths.delete(chatId);
+        browsingSubdirs.delete(chatId);
+
+        const text = `✅ <b>Working directory updated to:</b>\n<code>${current}</code>`;
+        try {
+          await ctx.editMessageText(text, { parse_mode: "HTML" });
+        } catch {
+          await ctx.reply(text, { parse_mode: "HTML" });
+        }
+        return;
+      }
+
+      if (action === "nav") {
+        const arg = parts[2];
+        let nextPath = current;
+        if (arg === "up") {
+          nextPath = path.resolve(current, "..");
+        } else {
+          const index = Number.parseInt(arg, 10);
+          const subdirs = browsingSubdirs.get(chatId) ?? [];
+          const folder = subdirs[index];
+          if (folder) {
+            nextPath = path.resolve(current, folder);
+          } else {
+            await ctx.answerCallbackQuery({
+              text: "Folder not found.",
+              show_alert: true,
+            });
+            return;
+          }
+        }
+
+        try {
+          fs.accessSync(nextPath, fs.constants.R_OK);
+          browsingPaths.set(chatId, nextPath);
+          await ctx.answerCallbackQuery();
+          await renderExplorer(ctx, chatId, true);
+        } catch (err) {
+          await ctx.answerCallbackQuery({
+            text: `Cannot access folder: ${(err as Error).message}`,
+            show_alert: true,
+          });
+        }
+        return;
+      }
+    }
   });
 
   bot.catch((err) => {

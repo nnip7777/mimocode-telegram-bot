@@ -104,6 +104,7 @@ Bot: [analyzes and fixes the bug]
 | `/help` | Show all commands |
 | `/new` | Start a new session |
 | `/cancel` | Stop running task |
+| `/workdir` | Browse and change workspace directory |
 | `/status` | Connection & session info |
 | `/sessions` | List all sessions (reply number to switch) |
 | `/model` | Switch model |

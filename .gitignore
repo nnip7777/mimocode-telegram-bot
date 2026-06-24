@@ -3,3 +3,5 @@ dist/
 .env
 *.log
 .claude/
+docs/plan/
+docs/compose/

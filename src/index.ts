@@ -45,6 +45,7 @@ console.log("\n  Registering bot commands...");
 const cmdResult = await bot.api.setMyCommands([
   { command: "start", description: "Show help & quick actions" },
   { command: "help", description: "Show all commands" },
+  { command: "workdir", description: "Browse & change workspace directory" },
   { command: "new", description: "Start a new session" },
   { command: "cancel", description: "Stop running task" },
   { command: "status", description: "Connection & session info" },

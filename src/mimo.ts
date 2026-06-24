@@ -15,7 +15,7 @@ export type SendMessageOpts = {
 };
 
 export class MimoClient {
-  private readonly workDir: string;
+  private workDir: string;
   private readonly mimoApiUrl?: string;
   private readonly skipPermissions: boolean;
   private sessions: Map<string, string> = new Map();
@@ -28,6 +28,14 @@ export class MimoClient {
     this.workDir = config.mimoWorkDir;
     this.mimoApiUrl = config.mimoApiUrl;
     this.skipPermissions = config.skipPermissions;
+  }
+
+  getWorkDir(): string {
+    return this.workDir;
+  }
+
+  setWorkDir(workDir: string): void {
+    this.workDir = workDir;
   }
 
   clearSession(chatId: string): void {

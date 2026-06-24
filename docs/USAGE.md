@@ -65,7 +65,7 @@ MIMO_SKIP_PERMISSIONS=true             # 跳过权限确认（危险，慎用）
 3. 解析 `TELEGRAM_ALLOWED_USER_ID`（为空则抛异常，拒绝启动）
 4. 解析各事件可见性环境变量（无效值自动 fallback 为默认值）
 5. `mimo --version` ping 检测 MiMoCode CLI 是否可用
-6. 注册 16 个 Telegram bot 命令
+6. 注册 17 个 Telegram bot 命令
 7. 启动 grammy bot 长轮询
 
 ---
@@ -399,6 +399,27 @@ Reply a number to switch session
 ```
 
 - 版本号会被缓存（`cachedVersion`），首次获取后不再调用 CLI
+
+### 3.18 `/workdir` — 工作目录管理器
+
+**源码**: `bot.ts` 相关的 `workdir` 指令、`renderExplorer` 以及 `callback_query` 逻辑
+
+加载并显示交互式文件夹管理器。用户可通过点击按钮的方式来导航进入子目录、返回上级目录，并最终确认选中目录：
+
+```
+/workdir  →  加载当前的工作目录，显示当前目录下的子文件夹 Inline 按钮
+```
+
+* **安全防御与限制绕过**：为避免 Telegram 的 `callback_data` 长度限制在 64 字节内而在遇到深层目录时导致 Bot 崩溃，返回的 Inline Keyboard 按子目录的索引编号（例如 `wd:nav:0`, `wd:nav:1` 等）来发送回调，从而提供无限深层路径的安全导航能力。
+* **全局生效**：选中并确认后，会立刻通过 `MimoClient.setWorkDir` 修改全局工作目录，之后所有的 mimo AI 执行动作（包含聊天、`/compose`、`/max`）都将立即生效到新目录下，实现无缝热重载。
+* **“在此创建新文件夹”功能**：
+  - 在所有子目录层级页面，均内置了 `➕ Create New Folder Here` 快捷按钮。
+  - 点击后，bot 将进入会话拦截状态，提示用户回复一个新的文件夹名。
+  - 用户回复新名称后，bot 会进行合法性校验（防范包含路径分隔符、特殊字符、点号等非法输入），并呈现**二次确认面板**。
+  - 确认面板包含三个按钮：
+    - `✅ Confirm`：确认创建。调用 `fs.mkdirSync` 生成新文件夹，会话自动导航并进入该新建的目录下，刷新显示。
+    - `❌ Don't Confirm`：不确认/重试。允许重新输入新的文件夹名称。
+    - `🔙 Cancel`：取消新建。恢复到正常的文件夹目录浏览页面。
 
 ---
 
