@@ -155,31 +155,6 @@ export function createBot(config: Config) {
     { sessions: Array<{ id: string; title: string }>; ts: number }
   >();
 
-  async function sendResult(chatId: string, msgId: number, content: string) {
-    const cleaned = stripSystemTags(content);
-    const chunks = formatLong(cleaned);
-    // First chunk: edit the placeholder. On HTML failure, retry as plain text.
-    try {
-      await bot.api.editMessageText(chatId, msgId, chunks[0], {
-        parse_mode: "HTML",
-      });
-    } catch {
-      await bot.api
-        .editMessageText(chatId, msgId, chunks[0].replace(/<[^>]+>/g, ""))
-        .catch(() => {});
-    }
-    // Subsequent chunks: each has its own try/catch to avoid mixing modes on partial failures.
-    for (let i = 1; i < chunks.length; i++) {
-      try {
-        await bot.api.sendMessage(chatId, chunks[i], { parse_mode: "HTML" });
-      } catch {
-        await bot.api
-          .sendMessage(chatId, chunks[i].replace(/<[^>]+>/g, ""))
-          .catch(() => {});
-      }
-    }
-  }
-
   async function sendLong(chatId: string, text: string) {
     const chunks = formatLong(text);
     for (const chunk of chunks) {
@@ -226,7 +201,7 @@ export function createBot(config: Config) {
           } else if (v === "hint") {
             bot.api.editMessageText(chatId, hintMsgId, hintIcon(evType) + " 正在回复...").catch(() => {});
           }
-          // "full": text is handled at the end by sendResult
+          // "full": text is handled at the end by sendLong
           return;
         }
         if (v === "hint") {
@@ -243,21 +218,31 @@ export function createBot(config: Config) {
         onEvent,
       };
       const result = await mimo.sendMessage(chatId, text, mergedOpts);
-      if (config.showText === "off" || (config.showText === "hint" && !result.content)) {
+      if (config.showText === "off") {
         await bot.api.deleteMessage(chatId, sent.message_id).catch(() => {});
         return;
       }
       if (!result.content) {
-        await bot.api
-          .editMessageText(chatId, sent.message_id, "(empty)")
-          .catch(() => {});
+        if (config.showText === "hint") {
+          await bot.api.editMessageText(chatId, sent.message_id, "(empty)")
+            .catch(() => {});
+        } else {
+          await bot.api
+            .editMessageText(chatId, sent.message_id, "(empty)")
+            .catch(() => {});
+        }
         return;
       }
+      // Delete placeholder so final text appears as a new message at the bottom.
+      // Keep placeholder only for hint mode which doesn't send final content.
+      if (config.showText !== "hint") {
+        await bot.api.deleteMessage(chatId, sent.message_id).catch(() => {});
+      }
       if (config.showText === "full") {
-        await sendResult(chatId, sent.message_id, result.content);
+        await sendLong(chatId, stripSystemTags(result.content));
       } else if (config.showText === "brief") {
         const firstLine = result.content.split("\n")[0] ?? result.content;
-        await bot.api.editMessageText(chatId, sent.message_id, firstLine.slice(0, 500))
+        await bot.api.sendMessage(chatId, firstLine.slice(0, 500))
           .catch(() => {});
       } else if (config.showText === "hint") {
         await bot.api.editMessageText(chatId, sent.message_id, "✓ 已回复")
