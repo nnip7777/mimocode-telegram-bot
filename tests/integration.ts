@@ -11,7 +11,11 @@ const config: Config = {
   mimoWorkDir: "/Users/moran/project/mimocode-telegram-bot",
   mimoApiUrl: process.env.MIMO_API_URL,
   skipPermissions: false,
-  runTimeoutMs: 60_000,
+  showText: "full",
+  showReasoning: "off",
+  showToolUse: "off",
+  showStepStart: "off",
+  showStepFinish: "off",
 };
 
 const chatId = "test-chat-001";
