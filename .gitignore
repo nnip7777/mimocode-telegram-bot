@@ -5,3 +5,5 @@ dist/
 .claude/
 docs/plan/
 docs/compose/
+ecosystem.config.cjs
+start.sh
