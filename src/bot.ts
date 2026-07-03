@@ -1,5 +1,6 @@
 import fs from "node:fs";
-import path from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import path, { join } from "node:path";
 import { Bot, type Context, InlineKeyboard, InputFile } from "grammy";
 import { type Config, isAllowed, type Verbosity } from "./config.js";
 import {
@@ -188,6 +189,29 @@ export function createBot(config: Config) {
         await bot.api.sendMessage(chatId, chunk, { parse_mode: "HTML" });
       } catch {
         await bot.api.sendMessage(chatId, chunk.replace(/<[^>]+>/g, ""));
+      }
+    }
+  }
+
+  async function sendResult(chatId: string, msgId: number, content: string) {
+    const cleaned = stripSystemTags(content);
+    const chunks = formatLong(cleaned);
+    try {
+      await bot.api.editMessageText(chatId, msgId, chunks[0], {
+        parse_mode: "HTML",
+      });
+    } catch {
+      await bot.api
+        .editMessageText(chatId, msgId, chunks[0].replace(/<[^>]+>/g, ""))
+        .catch(() => {});
+    }
+    for (let i = 1; i < chunks.length; i++) {
+      try {
+        await bot.api.sendMessage(chatId, chunks[i], { parse_mode: "HTML" });
+      } catch {
+        await bot.api
+          .sendMessage(chatId, chunks[i].replace(/<[^>]+>/g, ""))
+          .catch(() => {});
       }
     }
   }
@@ -773,6 +797,218 @@ export function createBot(config: Config) {
       await ctx.reply("Folder creation cancelled.");
     } else {
       await ctx.reply("No task running.");
+    }
+  });
+
+  // ── Photo messages → save & send to mimo ─────────────
+  const uploadsDir = join(config.mimoWorkDir, ".tg-uploads");
+
+  async function cleanupUploads(): Promise<void> {
+    try {
+      const { readdir, stat, unlink } = await import("node:fs/promises");
+      const files = await readdir(uploadsDir).catch(() => []);
+      const now = Date.now();
+      const maxAge = 24 * 60 * 60 * 1000;
+      for (const file of files) {
+        const fp = join(uploadsDir, file);
+        const s = await stat(fp).catch(() => null);
+        if (s && now - s.mtimeMs > maxAge) {
+          await unlink(fp).catch(() => {});
+        }
+      }
+    } catch {}
+  }
+
+  async function downloadPhoto(
+    ctx: Context,
+    token: string,
+  ): Promise<string | null> {
+    const photos = ctx.message?.photo;
+    if (!photos || photos.length === 0) return null;
+
+    const largest = photos[photos.length - 1];
+    const file = await ctx.api.getFile(largest.file_id);
+    const url = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+
+    const res = await fetch(url);
+    if (!res.ok) return null;
+
+    const ext = file.file_path?.endsWith(".png") ? ".png" : ".jpg";
+    const filename = `${Date.now()}-${ctx.message?.message_id ?? 0}${ext}`;
+
+    await mkdir(uploadsDir, { recursive: true });
+    const buf = Buffer.from(await res.arrayBuffer());
+    const filepath = join(uploadsDir, filename);
+    await writeFile(filepath, buf);
+
+    return filepath;
+  }
+
+  bot.on("message:photo", async (ctx) => {
+    if (!ctx.from) return;
+    const userId = String(ctx.from.id);
+
+    if (!isAllowed(userId, config)) {
+      await ctx.reply("Access denied.");
+      return;
+    }
+
+    const chatId = String(ctx.chat.id);
+    if (processing.has(chatId)) {
+      await ctx.reply("Task running. Wait or /cancel.");
+      return;
+    }
+
+    const caption = ctx.message.caption?.trim() ?? "";
+    const prompt =
+      caption || "Проанализируй это изображение. Опиши что на нём.";
+
+    processing.add(chatId);
+    const startTime = Date.now();
+    try {
+      cleanupUploads();
+      const sent = await ctx.reply("Downloading image...");
+      const filepath = await downloadPhoto(ctx, config.telegramToken);
+
+      if (!filepath) {
+        await bot.api.editMessageText(
+          chatId,
+          sent.message_id,
+          "Failed to download image.",
+        );
+        return;
+      }
+
+      await bot.api.editMessageText(
+        chatId,
+        sent.message_id,
+        "Analyzing image...",
+      );
+
+      const result = await mimo.sendMessage(chatId, prompt, {
+        imagePath: filepath,
+      });
+
+      if (!result.content) {
+        await bot.api
+          .editMessageText(chatId, sent.message_id, "(empty)")
+          .catch(() => {});
+        return;
+      }
+      await sendResult(chatId, sent.message_id, result.content);
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(
+        `[${new Date().toISOString()}] photo chat=${chatId} time=${elapsed}s file=${filepath}`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      try {
+        await ctx.reply(`Error: ${sanitizeError(msg)}`);
+      } catch {}
+    } finally {
+      processing.delete(chatId);
+    }
+  });
+
+  // ── Document messages → save & send to mimo ──────────
+  async function downloadDocument(
+    ctx: Context,
+    token: string,
+  ): Promise<{ filepath: string; mime: string } | null> {
+    const doc = ctx.message?.document;
+    if (!doc) return null;
+
+    const file = await ctx.api.getFile(doc.file_id);
+    const url = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+
+    const res = await fetch(url);
+    if (!res.ok) return null;
+
+    const mime = doc.mime_type ?? "application/octet-stream";
+    const ext = file.file_path?.split(".").pop() ?? "bin";
+    const filename = `${Date.now()}-${ctx.message?.message_id ?? 0}.${ext}`;
+
+    await mkdir(uploadsDir, { recursive: true });
+    const buf = Buffer.from(await res.arrayBuffer());
+    const filepath = join(uploadsDir, filename);
+    await writeFile(filepath, buf);
+
+    return { filepath, mime };
+  }
+
+  bot.on("message:document", async (ctx) => {
+    if (!ctx.from) return;
+    const userId = String(ctx.from.id);
+
+    if (!isAllowed(userId, config)) {
+      await ctx.reply("Access denied.");
+      return;
+    }
+
+    const chatId = String(ctx.chat.id);
+    if (processing.has(chatId)) {
+      await ctx.reply("Task running. Wait or /cancel.");
+      return;
+    }
+
+    const doc = ctx.message?.document;
+    if (!doc) return;
+
+    const mime = doc.mime_type ?? "";
+    const isImage = mime.startsWith("image/");
+    const isPdf = mime === "application/pdf";
+
+    if (!isImage && !isPdf) {
+      await ctx.reply("Only images and PDFs are supported.");
+      return;
+    }
+
+    const caption = ctx.message.caption?.trim() ?? "";
+    const defaultPrompt = isPdf
+      ? "Проанализируй этот PDF-документ. Опиши содержание."
+      : "Проанализируй это изображение. Опиши что на нём.";
+    const prompt = caption || defaultPrompt;
+
+    processing.add(chatId);
+    const startTime = Date.now();
+    try {
+      cleanupUploads();
+      const sent = await ctx.reply("Downloading file...");
+      const result = await downloadDocument(ctx, config.telegramToken);
+
+      if (!result) {
+        await bot.api.editMessageText(
+          chatId,
+          sent.message_id,
+          "Failed to download file.",
+        );
+        return;
+      }
+
+      await bot.api.editMessageText(chatId, sent.message_id, "Analyzing...");
+
+      const response = await mimo.sendMessage(chatId, prompt, {
+        imagePath: result.filepath,
+      });
+
+      if (!response.content) {
+        await bot.api
+          .editMessageText(chatId, sent.message_id, "(empty)")
+          .catch(() => {});
+        return;
+      }
+      await sendResult(chatId, sent.message_id, response.content);
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(
+        `[${new Date().toISOString()}] document chat=${chatId} time=${elapsed}s file=${result.filepath}`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      try {
+        await ctx.reply(`Error: ${sanitizeError(msg)}`);
+      } catch {}
+    } finally {
+      processing.delete(chatId);
     }
   });
 

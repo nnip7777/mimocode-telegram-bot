@@ -73,6 +73,8 @@ describe("isAllowed", () => {
     workdirRoot: "/tmp",
     workdirBrowseEnabled: false,
     skipPermissions: false,
+    runTimeoutMs: 120_000,
+    contextLimit: 100_000,
     showText: "full",
     showReasoning: "off",
     showToolUse: "off",
@@ -104,6 +106,7 @@ describe("loadConfig", () => {
       ...ORIGINAL_ENV,
       TELEGRAM_BOT_TOKEN: "test-token-123",
       TELEGRAM_ALLOWED_USER_ID: "111, 222",
+      MIMO_SKIP_PERMISSIONS: "false",
     };
   });
 

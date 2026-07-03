@@ -65,6 +65,13 @@ console.log(`  Commands registered: ${cmdResult ? "OK" : "FAILED"}`);
 
 console.log("\n  Bot started. Send /start in Telegram.\n");
 
+process.on("unhandledRejection", (err) => {
+  console.error("[fatal] unhandled rejection:", err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[fatal] uncaught exception:", err);
+});
+
 const stop = bot.start();
 process.on("SIGTERM", () => {
   console.log("\n  Shutting down...");

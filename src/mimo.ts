@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import type { Config } from "./config.js";
 
 export type MimoResponse = {
@@ -11,6 +12,7 @@ export type SendMessageOpts = {
   agent?: string;
   thinking?: boolean;
   variant?: string;
+  imagePath?: string;
   onEvent?: (event: Record<string, unknown>) => void;
 };
 
@@ -18,16 +20,38 @@ export class MimoClient {
   private workDir: string;
   private readonly mimoApiUrl?: string;
   private readonly skipPermissions: boolean;
+  private readonly runTimeoutMs: number;
+  private readonly contextLimit: number;
   private sessions: Map<string, string> = new Map();
   private processes: Map<string, ChildProcess> = new Map();
   private chatModels: Map<string, string> = new Map();
   private chatAgents: Map<string, string> = new Map();
+  private sessionTokens: Map<string, number> = new Map();
   private cachedVersion: string | undefined;
 
   constructor(config: Config) {
     this.workDir = config.mimoWorkDir;
     this.mimoApiUrl = config.mimoApiUrl;
     this.skipPermissions = config.skipPermissions;
+    this.runTimeoutMs = config.runTimeoutMs;
+    this.contextLimit = config.contextLimit;
+  }
+
+  clearSession(chatId: string): void {
+    this.sessions.delete(chatId);
+    this.chatModels.delete(chatId);
+    this.chatAgents.delete(chatId);
+    this.sessionTokens.delete(chatId);
+  }
+
+  private trackTokens(chatId: string, tokens: number): void {
+    const prev = this.sessionTokens.get(chatId) ?? 0;
+    this.sessionTokens.set(chatId, prev + tokens);
+  }
+
+  private shouldRotate(chatId: string): boolean {
+    const tokens = this.sessionTokens.get(chatId) ?? 0;
+    return tokens >= this.contextLimit;
   }
 
   getWorkDir(): string {
@@ -36,12 +60,6 @@ export class MimoClient {
 
   setWorkDir(workDir: string): void {
     this.workDir = workDir;
-  }
-
-  clearSession(chatId: string): void {
-    this.sessions.delete(chatId);
-    this.chatModels.delete(chatId);
-    this.chatAgents.delete(chatId);
   }
 
   setSession(chatId: string, sessionId: string): void {
@@ -168,7 +186,31 @@ export class MimoClient {
     const agent = opts?.agent ?? this.chatAgents.get(chatId);
 
     const runMimo = async (sessionToUse?: string): Promise<MimoResponse> => {
-      const args = ["run", text, "--format", "json"];
+      let fullText = text;
+
+      if (opts?.imagePath) {
+        try {
+          const buf = await readFile(opts.imagePath);
+          const ext = opts.imagePath.split(".").pop()?.toLowerCase() ?? "png";
+          const mimeMap: Record<string, string> = {
+            jpg: "image/jpeg",
+            jpeg: "image/jpeg",
+            png: "image/png",
+            gif: "image/gif",
+            webp: "image/webp",
+            bmp: "image/bmp",
+            svg: "image/svg+xml",
+            pdf: "application/pdf",
+          };
+          const mime = mimeMap[ext] ?? `image/${ext}`;
+          const b64 = buf.toString("base64");
+          fullText = `[Image (${mime}): data:${mime};base64,${b64.slice(0, 100)}...]\n\n${text}`;
+        } catch (err) {
+          console.warn(`[mimo] failed to read image ${opts.imagePath}:`, err);
+        }
+      }
+
+      const args = ["run", fullText, "--format", "json"];
       if (this.skipPermissions) {
         args.push("--dangerously-skip-permissions");
       }
@@ -237,8 +279,22 @@ export class MimoClient {
       if (newSessionId) {
         this.sessions.set(chatId, newSessionId);
       }
+
+      const inputTokens = text.length / 4;
+      const outputTokens = fullContent.length / 4;
+      this.trackTokens(chatId, inputTokens + outputTokens);
+
       return { content: fullContent, sessionId: newSessionId };
     };
+
+    if (this.shouldRotate(chatId)) {
+      console.warn(
+        `[mimo] session ${sessionId} exceeded context limit (${this.contextLimit} tokens); auto-rotating`,
+      );
+      this.sessions.delete(chatId);
+      this.sessionTokens.delete(chatId);
+      return runMimo();
+    }
 
     try {
       return await runMimo(sessionId);
@@ -250,6 +306,7 @@ export class MimoClient {
           `[mimo] session ${sessionId} not found during run; retrying with a new session`,
         );
         this.sessions.delete(chatId);
+        this.sessionTokens.delete(chatId);
         return runMimo();
       }
       throw err;

@@ -9,6 +9,8 @@ const baseConfig: Config = {
   workdirRoot: "/tmp",
   workdirBrowseEnabled: false,
   skipPermissions: false,
+  runTimeoutMs: 120_000,
+  contextLimit: 100_000,
   showText: "full",
   showReasoning: "off",
   showToolUse: "off",

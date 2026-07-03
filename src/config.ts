@@ -33,6 +33,8 @@ export type Config = {
   readonly workdirBrowseEnabled: boolean;
   readonly mimoApiUrl?: string;
   readonly skipPermissions: boolean;
+  readonly runTimeoutMs: number;
+  readonly contextLimit: number;
   readonly showText: Verbosity;
   readonly showReasoning: Verbosity;
   readonly showToolUse: Verbosity;
@@ -53,6 +55,17 @@ export function loadConfig(): Config {
     );
   }
 
+  const runTimeoutMsRaw = process.env.MIMO_RUN_TIMEOUT_MS;
+  const runTimeoutMs = runTimeoutMsRaw ? Number(runTimeoutMsRaw) : 120_000;
+  if (Number.isNaN(runTimeoutMs) || runTimeoutMs <= 0) {
+    throw new Error(
+      "MIMO_RUN_TIMEOUT_MS must be a positive number (milliseconds)",
+    );
+  }
+
+  const contextLimitRaw = process.env.MIMO_CONTEXT_LIMIT;
+  const contextLimit = contextLimitRaw ? Number(contextLimitRaw) : 100_000;
+
   return {
     telegramToken: env("TELEGRAM_BOT_TOKEN"),
     allowedUserIds,
@@ -64,6 +77,8 @@ export function loadConfig(): Config {
     workdirBrowseEnabled: envBool("MIMO_WORKDIR_BROWSE", false),
     mimoApiUrl: process.env.MIMO_API_URL || undefined,
     skipPermissions: envBool("MIMO_SKIP_PERMISSIONS", false),
+    runTimeoutMs,
+    contextLimit,
     showText: envVerbosity("MIMO_SHOW_TEXT", "full"),
     showReasoning: envVerbosity("MIMO_SHOW_REASONING", "off"),
     showToolUse: envVerbosity("MIMO_SHOW_TOOL_USE", "off"),
