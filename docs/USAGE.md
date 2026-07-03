@@ -582,7 +582,7 @@ Bot:  MiMoCode Bot v0.1.1
 
 用户: What's in this directory?
 Bot:  (typing 指示器显示，每条工具调用作为独立消息出现)
-      🔧 read: /home/pluto/app
+      🔧 read: /path/to/mimocode-telegram-bot
       The directory contains:
       src/  - source code
       tests/ - test files
@@ -733,19 +733,19 @@ pm2 monit                         # CPU/内存监控面板
 ### 日志位置
 
 ```
-/home/pluto/.pm2/logs/mimocode-telegram-bot-out.log   # 标准输出
-/home/pluto/.pm2/logs/mimocode-telegram-bot-err.log   # 错误输出
+/path/to/mimocode-telegram-bot/.pm2/logs/mimocode-telegram-bot-out.log   # 标准输出
+/path/to/mimocode-telegram-bot/.pm2/logs/mimocode-telegram-bot-err.log   # 错误输出
 ```
 
 ### 启动脚本
 
 ```bash
-/home/pluto/mimocode-telegram-bot/start.sh    # PM2 实际执行的包装脚本
+/path/to/mimocode-telegram-bot/mimocode-telegram-bot/start.sh    # PM2 实际执行的包装脚本
 ```
 
 ### 自启与自恢复
 
-- PM2 systemd 服务 `pm2-pluto.service` 已配置开机自启
+- PM2 systemd 服务 `pm2-<your-user>.service` 已配置开机自启
 - `autorestart: true` — 异常退出自动重启
 - `restart_delay: 5000` — 两次重启间隔 5 秒
 - `max_restarts: 10` — 连续重启 10 次后停止（防止死循环）
