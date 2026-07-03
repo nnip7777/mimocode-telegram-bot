@@ -283,6 +283,17 @@ export function createBot(config: Config) {
         onEvent,
       };
 
+      if (!mimo.getSessionId(chatId)) {
+        const recent = history.getRecent(chatId, 20);
+        if (recent.length > 0) {
+          const contextLines = recent.map((m) => {
+            const role = m.role === "user" ? "User" : "Assistant";
+            return `${role}: ${m.text.slice(0, 500)}`;
+          });
+          mergedOpts.contextPrefix = `Previous conversation context:\n${contextLines.join("\n")}`;
+        }
+      }
+
       history.addMessage(chatId, userId, "user", text);
       const result = await mimo.sendMessage(chatId, text, mergedOpts);
 

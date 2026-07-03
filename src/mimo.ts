@@ -13,6 +13,7 @@ export type SendMessageOpts = {
   thinking?: boolean;
   variant?: string;
   imagePath?: string;
+  contextPrefix?: string;
   onEvent?: (event: Record<string, unknown>) => void;
 };
 
@@ -341,11 +342,11 @@ export class MimoClient {
       );
       this.sessions.delete(chatId);
       this.sessionTokens.delete(chatId);
-      return runMimo();
+      return runMimo(undefined, opts?.contextPrefix);
     }
 
     try {
-      return await runMimo(sessionId);
+      return await runMimo(sessionId, opts?.contextPrefix);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       const clean = msg.replace(/\x1b\[[0-9;]*m/g, "");
@@ -355,7 +356,7 @@ export class MimoClient {
         );
         this.sessions.delete(chatId);
         this.sessionTokens.delete(chatId);
-        return runMimo();
+        return runMimo(undefined, opts?.contextPrefix);
       }
       throw err;
     }
