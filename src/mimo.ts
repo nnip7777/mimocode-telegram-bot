@@ -176,6 +176,22 @@ export class MimoClient {
     return version;
   }
 
+  private async httpPost(
+    path: string,
+    body: Record<string, unknown>,
+  ): Promise<unknown> {
+    const res = await fetch(`${this.mimoApiUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(this.runTimeoutMs),
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${await res.text().catch(() => "")}`);
+    }
+    return res.json();
+  }
+
   async sendMessage(
     chatId: string,
     text: string,
@@ -185,8 +201,11 @@ export class MimoClient {
     const model = opts?.model ?? this.chatModels.get(chatId);
     const agent = opts?.agent ?? this.chatAgents.get(chatId);
 
-    const runMimo = async (sessionToUse?: string): Promise<MimoResponse> => {
-      let fullText = text;
+    const runMimo = async (
+      sessionToUse?: string,
+      contextPrefix?: string,
+    ): Promise<MimoResponse> => {
+      let fullText = contextPrefix ? `${contextPrefix}\n\n---\n\n${text}` : text;
 
       if (opts?.imagePath) {
         try {
@@ -204,18 +223,49 @@ export class MimoClient {
           };
           const mime = mimeMap[ext] ?? `image/${ext}`;
           const b64 = buf.toString("base64");
-          fullText = `[Image (${mime}): data:${mime};base64,${b64.slice(0, 100)}...]\n\n${text}`;
+          fullText = `[Image (${mime}): data:${mime};base64,${b64.slice(0, 100)}...]\n\n${fullText}`;
         } catch (err) {
           console.warn(`[mimo] failed to read image ${opts.imagePath}:`, err);
         }
       }
 
+      if (this.mimoApiUrl) {
+        const sid = sessionToUse ?? await this.createSession();
+        const parts: Array<Record<string, unknown>> = [];
+        parts.push({ type: "text", text: fullText });
+        const body: Record<string, unknown> = { parts };
+        if (model) body.model = model;
+        if (agent) body.agent = agent;
+        if (opts?.thinking) body.thinking = true;
+
+        const result = (await this.httpPost(
+          `/session/${sid}/message`,
+          body,
+        )) as {
+          parts?: Array<{ type: string; text?: string }>;
+        };
+
+        let fullContent = "";
+        if (result.parts) {
+          for (const part of result.parts) {
+            if (part.type === "text" && part.text) {
+              fullContent += part.text;
+            }
+          }
+        }
+
+        this.sessions.set(chatId, sid);
+
+        const inputTokens = text.length / 4;
+        const outputTokens = fullContent.length / 4;
+        this.trackTokens(chatId, inputTokens + outputTokens);
+
+        return { content: fullContent, sessionId: sid };
+      }
+
       const args = ["run", fullText, "--format", "json"];
       if (this.skipPermissions) {
         args.push("--dangerously-skip-permissions");
-      }
-      if (this.mimoApiUrl) {
-        args.push("--attach", this.mimoApiUrl, "--dir", this.workDir);
       }
       if (sessionToUse) {
         args.push("--session", sessionToUse);
@@ -269,8 +319,6 @@ export class MimoClient {
           `mimo run failed (code ${code}): ${stderr.slice(0, 200)}`,
         );
       }
-      // mimo CLI exits 0 even when it logs a "Session not found" error to stderr.
-      // Treat that as a stale-session failure so the caller can retry.
       if (fullContent === "" && /Session not found/.test(stderr)) {
         throw new Error(
           `mimo run failed: Session not found: ${stderr.slice(0, 200)}`,
@@ -311,5 +359,12 @@ export class MimoClient {
       }
       throw err;
     }
+  }
+
+  private async createSession(): Promise<string> {
+    const data = (await this.httpPost("/session", {
+      directory: this.workDir,
+    })) as { id: string };
+    return data.id;
   }
 }
