@@ -152,3 +152,16 @@ describe("mkdir target boundaries (F3)", () => {
     expect(isInsideRoot("/tmp/subdir/../../etc/evil", "/tmp")).toBe(false);
   });
 });
+
+describe("folder creation state boundaries (F5)", () => {
+  it("isInsideRoot blocks absolute paths outside root", () => {
+    expect(isInsideRoot("/etc", "/tmp")).toBe(false);
+    expect(isInsideRoot("/var", "/tmp")).toBe(false);
+    expect(isInsideRoot("/home", "/tmp")).toBe(false);
+  });
+
+  it("isInsideRoot allows root and subdirectories", () => {
+    expect(isInsideRoot("/tmp", "/tmp")).toBe(true);
+    expect(isInsideRoot("/tmp/subdir", "/tmp")).toBe(true);
+  });
+});
