@@ -49,6 +49,8 @@ TELEGRAM_ALLOWED_USER_ID=123456789
 
 # Optional
 MIMO_WORK_DIR=/path/to/your/project
+MIMO_WORKDIR_ROOT=/path/to/your/project
+MIMO_WORKDIR_BROWSE=false
 MIMO_API_URL=http://127.0.0.1:4096
 MIMO_SKIP_PERMISSIONS=false
 ```

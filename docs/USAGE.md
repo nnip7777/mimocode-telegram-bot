@@ -46,6 +46,8 @@ TELEGRAM_ALLOWED_USER_ID=111111,222222 # 逗号分隔的白名单，空则拒绝
 
 # ─── 可选 ───
 MIMO_WORK_DIR=/path/to/project         # mimo CLI 的工作目录（默认当前目录）
+MIMO_WORKDIR_ROOT=/path/to/project     # 文件系统浏览器的根目录边界（用于 /workdir）
+MIMO_WORKDIR_BROWSE=false              # 是否启用 /workdir 文件浏览器（默认关闭）
 MIMO_API_URL=http://127.0.0.1:4096     # 连接已有 MiMoCode 服务（不填则自动启动）
 MIMO_SKIP_PERMISSIONS=true             # 跳过权限确认（危险，慎用）
 
