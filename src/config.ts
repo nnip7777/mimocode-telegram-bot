@@ -29,6 +29,8 @@ export type Config = {
   readonly telegramToken: string;
   readonly allowedUserIds: readonly string[];
   readonly mimoWorkDir: string;
+  readonly workdirRoot: string;
+  readonly workdirBrowseEnabled: boolean;
   readonly mimoApiUrl?: string;
   readonly skipPermissions: boolean;
   readonly showText: Verbosity;
@@ -55,6 +57,11 @@ export function loadConfig(): Config {
     telegramToken: env("TELEGRAM_BOT_TOKEN"),
     allowedUserIds,
     mimoWorkDir: env("MIMO_WORK_DIR", resolve(process.cwd())),
+    workdirRoot: resolve(
+      process.env.MIMO_WORKDIR_ROOT ||
+        env("MIMO_WORK_DIR", resolve(process.cwd())),
+    ),
+    workdirBrowseEnabled: envBool("MIMO_WORKDIR_BROWSE", false),
     mimoApiUrl: process.env.MIMO_API_URL || undefined,
     skipPermissions: envBool("MIMO_SKIP_PERMISSIONS", false),
     showText: envVerbosity("MIMO_SHOW_TEXT", "full"),

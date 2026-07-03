@@ -1,13 +1,13 @@
 import { describe, expect, it } from "bun:test";
-import { checkAuth, sanitizeError } from "./bot.js";
+import { checkAuth, isInsideRoot, sanitizeError } from "./bot.js";
 import type { Config } from "./config.js";
-
-// ── checkAuth ─────────────────────────────────────────
 
 const baseConfig: Config = {
   telegramToken: "test-token",
   allowedUserIds: ["111", "222"],
   mimoWorkDir: "/tmp",
+  workdirRoot: "/tmp",
+  workdirBrowseEnabled: false,
   skipPermissions: false,
   showText: "full",
   showReasoning: "off",

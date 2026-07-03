@@ -27,6 +27,13 @@ export function sanitizeError(raw: string): string {
   return clean || "Unknown error";
 }
 
+/** True iff `candidate` is `root` or strictly inside it. */
+export function isInsideRoot(candidate: string, root: string): boolean {
+  const r = path.resolve(root);
+  const c = path.resolve(candidate);
+  return c === r || c.startsWith(r + path.sep);
+}
+
 const eventVerbosityKey: Record<string, keyof Config> = {
   text: "showText",
   reasoning: "showReasoning",
