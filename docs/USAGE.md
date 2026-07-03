@@ -441,7 +441,7 @@ Reply a number to switch session
 
 ```typescript
 function sanitizeError(raw: string): string {
-  // 1. 替换 Unix 路径: /home/user/file.ts → <path>
+  // 1. 替换 Unix 路径: /path/to/project/file.ts → <path>
   // 2. 替换 Windows 路径: C:\Users\... → <path>
   // 3. 清除 ANSI 转义码
   // 4. 截断至 100 字符 + "..."
