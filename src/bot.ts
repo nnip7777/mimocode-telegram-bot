@@ -225,7 +225,7 @@ export function createBot(config: Config) {
             }
           } else if (v === "hint") {
             bot.api
-              .sendMessage(chatId, hintIcon(evType) + " 回复中...")
+              .sendMessage(chatId, `${hintIcon(evType)} 回复中...`)
               .catch(() => {});
           }
           return;
