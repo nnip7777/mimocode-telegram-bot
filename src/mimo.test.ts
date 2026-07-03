@@ -6,6 +6,8 @@ const baseConfig: Config = {
   telegramToken: "test-token",
   allowedUserIds: ["111"],
   mimoWorkDir: "/tmp",
+  workdirRoot: "/tmp",
+  workdirBrowseEnabled: false,
   skipPermissions: false,
   showText: "full",
   showReasoning: "off",

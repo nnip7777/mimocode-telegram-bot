@@ -70,6 +70,8 @@ describe("isAllowed", () => {
     telegramToken: "test-token",
     allowedUserIds: ["111", "222"],
     mimoWorkDir: "/tmp",
+    workdirRoot: "/tmp",
+    workdirBrowseEnabled: false,
     skipPermissions: false,
     showText: "full",
     showReasoning: "off",

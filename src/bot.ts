@@ -305,7 +305,7 @@ export function createBot(config: Config) {
       errMessage = "<i>(No subdirectories found)</i>";
     }
 
-    const isRoot = path.resolve(current) === path.resolve("/");
+    const isRoot = path.resolve(current) === path.resolve(config.workdirRoot);
     if (!isRoot) {
       kb.text("⬅️ Up", "wd:nav:up");
     }
@@ -340,6 +340,13 @@ export function createBot(config: Config) {
   bot.command("workdir", async (ctx) => {
     if (!checkAuth(ctx, config)) {
       await ctx.reply("Access denied.");
+      return;
+    }
+    if (!config.workdirBrowseEnabled) {
+      await ctx.reply(
+        "The /workdir feature is not enabled. Set <code>MIMO_WORKDIR_BROWSE=true</code> to enable.",
+        { parse_mode: "HTML" },
+      );
       return;
     }
     const chatId = String(ctx.chat.id);
@@ -933,7 +940,11 @@ export function createBot(config: Config) {
             pendingFolderName.delete(chatId);
 
             // Update active browsing path to the newly created folder
-            browsingPaths.set(chatId, targetPath);
+            // F1: clamp to workdirRoot
+            const nextNav = isInsideRoot(targetPath, config.workdirRoot)
+              ? targetPath
+              : config.workdirRoot;
+            browsingPaths.set(chatId, nextNav);
             await renderExplorer(ctx, chatId, true);
           } catch (err) {
             await ctx.answerCallbackQuery({
@@ -986,6 +997,14 @@ export function createBot(config: Config) {
           await ctx.answerCallbackQuery();
           await renderExplorer(ctx, chatId, true);
         } catch (err) {
+          // F1: guard navigation to stay inside workdirRoot
+          if (!isInsideRoot(nextPath, config.workdirRoot)) {
+            await ctx.answerCallbackQuery({
+              text: "Navigation outside workspace is not allowed.",
+              show_alert: true,
+            });
+            return;
+          }
           await ctx.answerCallbackQuery({
             text: `Cannot access folder: ${(err as Error).message}`,
             show_alert: true,

@@ -33,8 +33,6 @@ describe("checkAuth", () => {
   });
 });
 
-// ── sanitizeError ─────────────────────────────────────
-
 describe("sanitizeError", () => {
   it("masks Unix-style paths", () => {
     const result = sanitizeError("error in /home/user/project/file.ts");
@@ -57,7 +55,7 @@ describe("sanitizeError", () => {
   it("truncates long errors to 100 chars", () => {
     const longError = "x".repeat(200);
     const result = sanitizeError(longError);
-    expect(result.length).toBeLessThanOrEqual(110); // 100 + "..."
+    expect(result.length).toBeLessThanOrEqual(110);
     expect(result).toContain("...");
   });
 
@@ -67,5 +65,90 @@ describe("sanitizeError", () => {
 
   it("preserves short messages", () => {
     expect(sanitizeError("connection refused")).toBe("connection refused");
+  });
+});
+
+describe("isInsideRoot", () => {
+  it("returns true for root itself", () => {
+    expect(isInsideRoot("/workspace", "/workspace")).toBe(true);
+  });
+
+  it("returns true for a subdirectory", () => {
+    expect(isInsideRoot("/workspace/projects", "/workspace")).toBe(true);
+  });
+
+  it("returns false for a sibling directory", () => {
+    expect(isInsideRoot("/other", "/workspace")).toBe(false);
+  });
+
+  it("returns false for parent traversal", () => {
+    expect(isInsideRoot("/workspace/../etc", "/workspace")).toBe(false);
+  });
+
+  it("returns false for root filesystem", () => {
+    expect(isInsideRoot("/", "/workspace")).toBe(false);
+  });
+
+  it("handles trailing slash in root", () => {
+    expect(isInsideRoot("/workspace/a", "/workspace/")).toBe(true);
+  });
+
+  it("returns false for absolute paths outside root", () => {
+    expect(isInsideRoot("/home/user/.ssh", "/workspace")).toBe(false);
+  });
+});
+
+describe("workdir navigation boundaries (F1)", () => {
+  it("wd:nav up from root stays at root (no escape)", () => {
+    expect(isInsideRoot("/tmp/..", "/tmp")).toBe(false);
+    expect(isInsideRoot("/tmp", "/tmp")).toBe(true);
+  });
+
+  it("wd:nav to sibling directory is blocked", () => {
+    expect(isInsideRoot("/etc", "/tmp")).toBe(false);
+    expect(isInsideRoot("/home", "/tmp")).toBe(false);
+  });
+
+  it("wd:nav to parent via .. is blocked", () => {
+    expect(isInsideRoot("/tmp/../../etc/passwd", "/tmp")).toBe(false);
+  });
+
+  it("root filesystem is blocked", () => {
+    expect(isInsideRoot("/", "/tmp")).toBe(false);
+  });
+
+  it("absolute path outside root is blocked", () => {
+    expect(isInsideRoot("/home/user/.ssh", "/tmp")).toBe(false);
+    expect(isInsideRoot("/var/log", "/tmp")).toBe(false);
+  });
+});
+
+describe("workdir selection boundaries (F2)", () => {
+  it("wd:sel on off-root path is blocked", () => {
+    expect(isInsideRoot("/etc", "/tmp")).toBe(false);
+    expect(isInsideRoot("/var", "/tmp")).toBe(false);
+  });
+
+  it("wd:sel on root itself is allowed", () => {
+    expect(isInsideRoot("/tmp", "/tmp")).toBe(true);
+  });
+
+  it("wd:sel on subdirectory is allowed", () => {
+    expect(isInsideRoot("/tmp/subdir", "/tmp")).toBe(true);
+  });
+});
+
+describe("mkdir target boundaries (F3)", () => {
+  it("mkdir target outside root is rejected", () => {
+    expect(isInsideRoot("/tmp/../etc/evil", "/tmp")).toBe(false);
+    expect(isInsideRoot("/etc/evil", "/tmp")).toBe(false);
+  });
+
+  it("mkdir target inside root is allowed", () => {
+    expect(isInsideRoot("/tmp/newfolder", "/tmp")).toBe(true);
+  });
+
+  it("traversal in mkdir target is blocked", () => {
+    expect(isInsideRoot("/tmp/subdir/../../etc/evil", "/tmp")).toBe(false);
   });
 });
