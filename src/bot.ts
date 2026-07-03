@@ -173,7 +173,12 @@ export function createBot(config: Config) {
   >();
   const browsingPaths = new Map<string, string>();
   const browsingSubdirs = new Map<string, string[]>();
-  const waitingForFolderName = new Map<string, string>();
+  // F5: typed state for folder-name creation
+  interface WaitEntry {
+    parentPath: string;
+    ts: number;
+  }
+  const waitingForFolderName = new Map<string, WaitEntry>();
   const pendingFolderName = new Map<string, string>();
 
   async function sendLong(chatId: string, text: string) {
@@ -274,7 +279,19 @@ export function createBot(config: Config) {
   }
 
   async function renderExplorer(ctx: Context, chatId: string, isEdit = false) {
-    const current = browsingPaths.get(chatId) ?? mimo.getWorkDir();
+    // F5: sweep stale folder-name wait entries (5 min TTL)
+    const now = Date.now();
+    for (const [key, entry] of waitingForFolderName) {
+      if (now - entry.ts > 5 * 60_000) {
+        waitingForFolderName.delete(key);
+        pendingFolderName.delete(key);
+      }
+    }
+
+    const rawCurrent = browsingPaths.get(chatId) ?? mimo.getWorkDir();
+    const current = isInsideRoot(rawCurrent, config.workdirRoot)
+      ? rawCurrent
+      : config.workdirRoot;
     let subdirs: string[] = [];
     let errMessage = "";
     try {
@@ -350,8 +367,8 @@ export function createBot(config: Config) {
       return;
     }
     const chatId = String(ctx.chat.id);
-    const current = mimo.getWorkDir();
-    browsingPaths.set(chatId, current);
+    // F1: seed browsing from workdirRoot, not from mimo's workdir
+    browsingPaths.set(chatId, config.workdirRoot);
     await renderExplorer(ctx, chatId);
   });
 
@@ -735,12 +752,20 @@ export function createBot(config: Config) {
   bot.command(["cancel", "stop"], async (ctx) => {
     if (!checkAuth(ctx, config)) return;
     const chatId = String(ctx.chat.id);
+    // F5: clean up folder-creation wait state on cancel
+    const hadWaitEntry = waitingForFolderName.has(chatId);
+    waitingForFolderName.delete(chatId);
+    pendingFolderName.delete(chatId);
     if (mimo.abort(chatId)) {
       processing.delete(chatId);
-      await ctx.reply("Task cancelled.");
+      const parts = ["Task cancelled."];
+      if (hadWaitEntry) parts.push("Folder creation also cancelled.");
+      await ctx.reply(parts.join(" "));
     } else if (processing.has(chatId)) {
       processing.delete(chatId);
       await ctx.reply("Task cancelled (process already finished).");
+    } else if (hadWaitEntry) {
+      await ctx.reply("Folder creation cancelled.");
     } else {
       await ctx.reply("No task running.");
     }
@@ -759,7 +784,14 @@ export function createBot(config: Config) {
     }
 
     if (waitingForFolderName.has(chatId)) {
-      const parentPath = waitingForFolderName.get(chatId) as string;
+      // F5: typed access — extract parentPath from structured state
+      const waitEntry = waitingForFolderName.get(chatId);
+      if (!waitEntry) {
+        waitingForFolderName.delete(chatId);
+        await ctx.reply("Folder creation expired. Use /workdir to try again.");
+        return;
+      }
+      const parentPath = waitEntry.parentPath;
       const folderName = text.trim();
 
       const isValid =
@@ -853,7 +885,10 @@ export function createBot(config: Config) {
 
       if (action === "newfolder") {
         await ctx.answerCallbackQuery();
-        waitingForFolderName.set(chatId, current);
+        waitingForFolderName.set(chatId, {
+          parentPath: current,
+          ts: Date.now(),
+        });
         pendingFolderName.delete(chatId);
 
         const promptText =
@@ -881,7 +916,8 @@ export function createBot(config: Config) {
 
       if (action === "mkdir") {
         const arg = parts[2];
-        const parentPath = waitingForFolderName.get(chatId);
+        const waitEntry = waitingForFolderName.get(chatId);
+        const parentPath = waitEntry?.parentPath;
         const folderName = pendingFolderName.get(chatId);
 
         if (arg === "cancel") {
@@ -931,6 +967,27 @@ export function createBot(config: Config) {
           const targetPath = path.resolve(parentPath, folderName);
 
           try {
+            // F3: guard mkdir target inside workspace root BEFORE writing
+            if (!isInsideRoot(targetPath, config.workdirRoot)) {
+              await ctx.answerCallbackQuery({
+                text: "Cannot create a folder outside the workspace root.",
+                show_alert: true,
+              });
+              waitingForFolderName.delete(chatId);
+              pendingFolderName.delete(chatId);
+              await renderExplorer(ctx, chatId, true);
+              return;
+            }
+
+            // F3: re-validate at write time
+            if (folderName === "." || folderName === "..") {
+              await ctx.answerCallbackQuery({
+                text: "Invalid folder name.",
+                show_alert: true,
+              });
+              return;
+            }
+
             fs.mkdirSync(targetPath, { recursive: true });
             await ctx.answerCallbackQuery({
               text: `Folder created: ${folderName}`,
@@ -940,7 +997,6 @@ export function createBot(config: Config) {
             pendingFolderName.delete(chatId);
 
             // Update active browsing path to the newly created folder
-            // F1: clamp to workdirRoot
             const nextNav = isInsideRoot(targetPath, config.workdirRoot)
               ? targetPath
               : config.workdirRoot;
@@ -958,6 +1014,14 @@ export function createBot(config: Config) {
 
       if (action === "sel") {
         await ctx.answerCallbackQuery();
+        // F2: guard setWorkDir to stay inside workspace root
+        if (!isInsideRoot(current, config.workdirRoot)) {
+          await ctx.answerCallbackQuery({
+            text: "Cannot select a directory outside the workspace root.",
+            show_alert: true,
+          });
+          return;
+        }
         mimo.setWorkDir(current);
         browsingPaths.delete(chatId);
         browsingSubdirs.delete(chatId);
@@ -991,20 +1055,21 @@ export function createBot(config: Config) {
           }
         }
 
+        // F1: boundary check BEFORE filesystem access
+        if (!isInsideRoot(nextPath, config.workdirRoot)) {
+          await ctx.answerCallbackQuery({
+            text: "Navigation outside workspace is not allowed.",
+            show_alert: true,
+          });
+          return;
+        }
+
         try {
           fs.accessSync(nextPath, fs.constants.R_OK);
           browsingPaths.set(chatId, nextPath);
           await ctx.answerCallbackQuery();
           await renderExplorer(ctx, chatId, true);
         } catch (err) {
-          // F1: guard navigation to stay inside workdirRoot
-          if (!isInsideRoot(nextPath, config.workdirRoot)) {
-            await ctx.answerCallbackQuery({
-              text: "Navigation outside workspace is not allowed.",
-              show_alert: true,
-            });
-            return;
-          }
           await ctx.answerCallbackQuery({
             text: `Cannot access folder: ${(err as Error).message}`,
             show_alert: true,

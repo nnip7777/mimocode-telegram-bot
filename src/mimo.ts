@@ -91,6 +91,7 @@ export class MimoClient {
     args: string[],
     chatId: string,
     onStdout: (chunk: Buffer) => void,
+    _onEvent?: (event: Record<string, unknown>) => void,
   ): Promise<{ stderr: string; code: number }> {
     return new Promise((resolve, reject) => {
       const proc = this.spawnProcess(args);
