@@ -9,3 +9,6 @@ ecosystem.config.cjs
 start.sh
 work/
 .pm2/
+
+.tg-bot/
+.tg-uploads/
