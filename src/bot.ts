@@ -1,6 +1,7 @@
+import fs from "node:fs";
+import path from "node:path";
 import { Bot, type Context, InlineKeyboard, InputFile } from "grammy";
-import type { Config } from "./config.js";
-import { isAllowed } from "./config.js";
+import { type Config, isAllowed, type Verbosity } from "./config.js";
 import {
   formatLong,
   parseJsonSafe,
@@ -26,6 +27,142 @@ export function sanitizeError(raw: string): string {
   return clean || "Unknown error";
 }
 
+/** True iff `candidate` is `root` or strictly inside it. */
+export function isInsideRoot(candidate: string, root: string): boolean {
+  const r = path.resolve(root);
+  const c = path.resolve(candidate);
+  return c === r || c.startsWith(r + path.sep);
+}
+
+const eventVerbosityKey: Record<string, keyof Config> = {
+  text: "showText",
+  reasoning: "showReasoning",
+  tool_use: "showToolUse",
+  step_start: "showStepStart",
+  step_finish: "showStepFinish",
+};
+
+function getVerbosity(evType: string, cfg: Config): Verbosity {
+  const key = eventVerbosityKey[evType];
+  if (!key) return "off";
+  return cfg[key] as Verbosity;
+}
+
+function hintIcon(evType: string): string {
+  switch (evType) {
+    case "reasoning":
+      return "💭";
+    case "tool_use":
+      return "🔧";
+    case "step_start":
+      return "⟳";
+    case "step_finish":
+      return "✓";
+    default:
+      return "⏳";
+  }
+}
+
+function formatEventHint(event: Record<string, unknown>): string {
+  const type = event.type as string;
+  const part = event.part as Record<string, unknown> | undefined;
+  switch (type) {
+    case "reasoning":
+      return "💭 正在思考...";
+    case "tool_use": {
+      const tool = (part?.tool as string) ?? "";
+      const state = part?.state as Record<string, unknown> | undefined;
+      const title = (state?.title as string) ?? "";
+      const inp = state?.input as Record<string, unknown> | undefined;
+      const cmd =
+        (inp?.command as string) ?? (inp?.description as string) ?? "";
+      return `🔧 ${tool}: ${(title || cmd).slice(0, 80)}`;
+    }
+    case "step_start":
+      return "⟳ 正在处理...";
+    case "step_finish": {
+      const tokens = part?.tokens as Record<string, number> | undefined;
+      const reason = (part?.reason as string) ?? "";
+      const cost = part?.cost as number | undefined;
+      let extra = "";
+      if (tokens) extra += ` ${tokens.total ?? 0}t`;
+      if (cost != null) extra += ` $${cost.toFixed(4)}`;
+      return `✓ 步骤完成 (${reason}${extra})`;
+    }
+    default:
+      return "⏳ 处理中...";
+  }
+}
+
+function formatEventBrief(event: Record<string, unknown>): string {
+  const type = event.type as string;
+  const part = event.part as Record<string, unknown> | undefined;
+  switch (type) {
+    case "reasoning": {
+      const text = (part?.text as string) ?? "";
+      const firstLine = text.split("\n")[0] ?? "";
+      return `💭 ${firstLine.slice(0, 200)}`;
+    }
+    case "tool_use": {
+      const tool = (part?.tool as string) ?? "";
+      const state = part?.state as Record<string, unknown> | undefined;
+      const title = (state?.title as string) ?? "";
+      const inp = state?.input as Record<string, unknown> | undefined;
+      const cmd =
+        (inp?.command as string) ?? (inp?.description as string) ?? "";
+      return `🔧 ${tool}: ${(title || cmd).slice(0, 200)}`;
+    }
+    case "step_start":
+      return "⟳ step start";
+    case "step_finish": {
+      const tokens = part?.tokens as Record<string, number> | undefined;
+      const reason = (part?.reason as string) ?? "";
+      if (tokens)
+        return `✓ step finish (${reason}, ${tokens.total ?? 0} tokens)`;
+      return `✓ step finish (${reason})`;
+    }
+    default:
+      return `${type}`;
+  }
+}
+
+function formatEventFull(event: Record<string, unknown>): string {
+  const type = event.type as string;
+  const part = event.part as Record<string, unknown> | undefined;
+  switch (type) {
+    case "reasoning": {
+      const text = (part?.text as string) ?? "";
+      return `💭 思考:\n${text}`;
+    }
+    case "tool_use": {
+      const tool = (part?.tool as string) ?? "";
+      const state = part?.state as Record<string, unknown> | undefined;
+      const inp = state?.input as Record<string, unknown> | undefined;
+      const output = (state?.output as string) ?? "";
+      const lines = [`🔧 ${tool}`];
+      const cmd = inp?.command as string | undefined;
+      const desc = inp?.description as string | undefined;
+      if (cmd) lines.push(`  command: ${cmd}`);
+      if (desc && desc !== cmd) lines.push(`  description: ${desc}`);
+      if (output) lines.push(`  output: ${output.slice(0, 500)}`);
+      return lines.join("\n");
+    }
+    case "step_start":
+      return "⟳ step start";
+    case "step_finish": {
+      const tokens = part?.tokens as Record<string, number> | undefined;
+      const reason = (part?.reason as string) ?? "";
+      const cost = part?.cost as number | undefined;
+      if (tokens) {
+        return `✓ step finish\n  reason: ${reason}\n  tokens: ${tokens.total ?? 0} (in:${tokens.input ?? 0} out:${tokens.output ?? 0})${cost != null ? ` cost:$${cost.toFixed(6)}` : ""}`;
+      }
+      return `✓ step finish (${reason})`;
+    }
+    default:
+      return `${type}: ${JSON.stringify(event).slice(0, 500)}`;
+  }
+}
+
 export function createBot(config: Config) {
   const bot = new Bot(config.telegramToken);
   const mimo = new MimoClient(config);
@@ -34,31 +171,15 @@ export function createBot(config: Config) {
     string,
     { sessions: Array<{ id: string; title: string }>; ts: number }
   >();
-
-  async function sendResult(chatId: string, msgId: number, content: string) {
-    const cleaned = stripSystemTags(content);
-    const chunks = formatLong(cleaned);
-    // First chunk: edit the placeholder. On HTML failure, retry as plain text.
-    try {
-      await bot.api.editMessageText(chatId, msgId, chunks[0], {
-        parse_mode: "HTML",
-      });
-    } catch {
-      await bot.api
-        .editMessageText(chatId, msgId, chunks[0].replace(/<[^>]+>/g, ""))
-        .catch(() => {});
-    }
-    // Subsequent chunks: each has its own try/catch to avoid mixing modes on partial failures.
-    for (let i = 1; i < chunks.length; i++) {
-      try {
-        await bot.api.sendMessage(chatId, chunks[i], { parse_mode: "HTML" });
-      } catch {
-        await bot.api
-          .sendMessage(chatId, chunks[i].replace(/<[^>]+>/g, ""))
-          .catch(() => {});
-      }
-    }
+  const browsingPaths = new Map<string, string>();
+  const browsingSubdirs = new Map<string, string[]>();
+  // F5: typed state for folder-name creation
+  interface WaitEntry {
+    parentPath: string;
+    ts: number;
   }
+  const waitingForFolderName = new Map<string, WaitEntry>();
+  const pendingFolderName = new Map<string, string>();
 
   async function sendLong(chatId: string, text: string) {
     const chunks = formatLong(text);
@@ -72,7 +193,6 @@ export function createBot(config: Config) {
   }
 
   type MimoRunOpts = {
-    placeholder: string;
     logPrefix: string;
     mimoOpts?: SendMessageOpts;
   };
@@ -85,16 +205,64 @@ export function createBot(config: Config) {
     }
     processing.add(chatId);
     const startTime = Date.now();
+
+    // Keep the "typing…" indicator alive while mimo is working.
+    // Telegram expires the status after ~5 seconds, so refresh every 4s.
+    const typingInterval = setInterval(() => {
+      bot.api.sendChatAction(chatId, "typing").catch(() => {});
+    }, 4000);
+    bot.api.sendChatAction(chatId, "typing").catch(() => {});
+
     try {
-      const sent = await ctx.reply(opts.placeholder);
-      const result = await mimo.sendMessage(chatId, text, opts.mimoOpts);
-      if (!result.content) {
-        await bot.api
-          .editMessageText(chatId, sent.message_id, "(empty)")
-          .catch(() => {});
+      const onEvent = (event: Record<string, unknown>) => {
+        const evType = event.type as string | undefined;
+        if (!evType) return;
+        const v = getVerbosity(evType, config);
+        if (v === "off") return;
+        if (evType === "text") {
+          if (v === "brief") {
+            const part = event.part as { text?: string } | undefined;
+            const firstLine = (part?.text ?? "").split("\n")[0] ?? "";
+            if (firstLine) {
+              bot.api
+                .sendMessage(chatId, firstLine.slice(0, 500))
+                .catch(() => {});
+            }
+          } else if (v === "hint") {
+            bot.api
+              .sendMessage(chatId, `${hintIcon(evType)} 回复中...`)
+              .catch(() => {});
+          }
+          return;
+        }
+        if (v === "hint") {
+          bot.api.sendMessage(chatId, formatEventHint(event)).catch(() => {});
+        } else if (v === "brief") {
+          bot.api.sendMessage(chatId, formatEventBrief(event)).catch(() => {});
+        } else if (v === "full") {
+          bot.api.sendMessage(chatId, formatEventFull(event)).catch(() => {});
+        }
+      };
+
+      const mergedOpts: SendMessageOpts = {
+        ...opts.mimoOpts,
+        onEvent,
+      };
+      const result = await mimo.sendMessage(chatId, text, mergedOpts);
+
+      if (!result.content || config.showText === "off") {
         return;
       }
-      await sendResult(chatId, sent.message_id, result.content);
+      if (config.showText === "full") {
+        await sendLong(chatId, stripSystemTags(result.content));
+      } else if (config.showText === "brief") {
+        const firstLine = result.content.split("\n")[0] ?? result.content;
+        await bot.api
+          .sendMessage(chatId, firstLine.slice(0, 500))
+          .catch(() => {});
+      } else if (config.showText === "hint") {
+        await bot.api.sendMessage(chatId, "✓ 已回复").catch(() => {});
+      }
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       console.log(
         `[${new Date().toISOString()}] ${opts.logPrefix} chat=${chatId} time=${elapsed}s`,
@@ -105,9 +273,104 @@ export function createBot(config: Config) {
         await ctx.reply(`Error: ${sanitizeError(msg)}`);
       } catch {}
     } finally {
+      clearInterval(typingInterval);
       processing.delete(chatId);
     }
   }
+
+  async function renderExplorer(ctx: Context, chatId: string, isEdit = false) {
+    // F5: sweep stale folder-name wait entries (5 min TTL)
+    const now = Date.now();
+    for (const [key, entry] of waitingForFolderName) {
+      if (now - entry.ts > 5 * 60_000) {
+        waitingForFolderName.delete(key);
+        pendingFolderName.delete(key);
+      }
+    }
+
+    const rawCurrent = browsingPaths.get(chatId) ?? mimo.getWorkDir();
+    const current = isInsideRoot(rawCurrent, config.workdirRoot)
+      ? rawCurrent
+      : config.workdirRoot;
+    let subdirs: string[] = [];
+    let errMessage = "";
+    try {
+      if (fs.existsSync(current)) {
+        const entries = fs.readdirSync(current, { withFileTypes: true });
+        subdirs = entries
+          .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+          .map((e) => e.name)
+          .sort();
+      } else {
+        errMessage = `Directory does not exist: <code>${current}</code>`;
+      }
+    } catch (err) {
+      errMessage = `Error reading directory: ${(err as Error).message}`;
+    }
+
+    browsingSubdirs.set(chatId, subdirs);
+
+    const kb = new InlineKeyboard();
+
+    if (subdirs.length > 0) {
+      for (let i = 0; i < subdirs.length; i++) {
+        kb.text(`📁 ${subdirs[i]}`, `wd:nav:${i}`);
+        if (i % 2 === 1) kb.row();
+      }
+      if (subdirs.length % 2 !== 0) kb.row();
+    } else if (!errMessage) {
+      errMessage = "<i>(No subdirectories found)</i>";
+    }
+
+    const isRoot = path.resolve(current) === path.resolve(config.workdirRoot);
+    if (!isRoot) {
+      kb.text("⬅️ Up", "wd:nav:up");
+    }
+    kb.text("➕ Create New Folder Here", "wd:newfolder").row();
+    kb.text("✅ Select This", "wd:sel");
+    kb.text("❌ Close", "wd:close");
+
+    const messageText =
+      `<b>📁 Workspace Explorer</b>\n\n` +
+      `Current Path:\n<code>${current}</code>\n\n` +
+      (errMessage ? `${errMessage}\n\n` : "") +
+      `Select a folder below to navigate, then click <b>Select This</b> to confirm.`;
+
+    if (isEdit) {
+      try {
+        await ctx.editMessageText(messageText, {
+          parse_mode: "HTML",
+          reply_markup: kb,
+        });
+      } catch (err) {
+        console.error("Failed to edit explorer message:", err);
+      }
+    } else {
+      await ctx.reply(messageText, {
+        parse_mode: "HTML",
+        reply_markup: kb,
+      });
+    }
+  }
+
+  // ── /workdir ─────────────────────────────────────────
+  bot.command("workdir", async (ctx) => {
+    if (!checkAuth(ctx, config)) {
+      await ctx.reply("Access denied.");
+      return;
+    }
+    if (!config.workdirBrowseEnabled) {
+      await ctx.reply(
+        "The /workdir feature is not enabled. Set <code>MIMO_WORKDIR_BROWSE=true</code> to enable.",
+        { parse_mode: "HTML" },
+      );
+      return;
+    }
+    const chatId = String(ctx.chat.id);
+    // F1: seed browsing from workdirRoot, not from mimo's workdir
+    browsingPaths.set(chatId, config.workdirRoot);
+    await renderExplorer(ctx, chatId);
+  });
 
   function mainMenuKb(): InlineKeyboard {
     return new InlineKeyboard()
@@ -360,7 +623,6 @@ export function createBot(config: Config) {
       return;
     }
     await runMimoCommand(ctx, text, {
-      placeholder: "⏳ Compose: plan → code → test → review...",
       logPrefix: "compose",
       mimoOpts: { agent: "compose" },
     });
@@ -375,7 +637,6 @@ export function createBot(config: Config) {
       return;
     }
     await runMimoCommand(ctx, text, {
-      placeholder: "⚡ Max mode...",
       logPrefix: "max",
       mimoOpts: { variant: "max" },
     });
@@ -491,12 +752,20 @@ export function createBot(config: Config) {
   bot.command(["cancel", "stop"], async (ctx) => {
     if (!checkAuth(ctx, config)) return;
     const chatId = String(ctx.chat.id);
+    // F5: clean up folder-creation wait state on cancel
+    const hadWaitEntry = waitingForFolderName.has(chatId);
+    waitingForFolderName.delete(chatId);
+    pendingFolderName.delete(chatId);
     if (mimo.abort(chatId)) {
       processing.delete(chatId);
-      await ctx.reply("Task cancelled.");
+      const parts = ["Task cancelled."];
+      if (hadWaitEntry) parts.push("Folder creation also cancelled.");
+      await ctx.reply(parts.join(" "));
     } else if (processing.has(chatId)) {
       processing.delete(chatId);
       await ctx.reply("Task cancelled (process already finished).");
+    } else if (hadWaitEntry) {
+      await ctx.reply("Folder creation cancelled.");
     } else {
       await ctx.reply("No task running.");
     }
@@ -511,6 +780,56 @@ export function createBot(config: Config) {
 
     if (!isAllowed(userId, config)) {
       await ctx.reply("Access denied.");
+      return;
+    }
+
+    if (waitingForFolderName.has(chatId)) {
+      // F5: typed access — extract parentPath from structured state
+      const waitEntry = waitingForFolderName.get(chatId);
+      if (!waitEntry) {
+        waitingForFolderName.delete(chatId);
+        await ctx.reply("Folder creation expired. Use /workdir to try again.");
+        return;
+      }
+      const parentPath = waitEntry.parentPath;
+      const folderName = text.trim();
+
+      const isValid =
+        folderName.length > 0 &&
+        !/[/\\?%*:|"<>]/.test(folderName) &&
+        folderName !== "." &&
+        folderName !== "..";
+      if (!isValid) {
+        const cancelKb = new InlineKeyboard().text(
+          "🔙 Cancel",
+          "wd:mkdir:cancel",
+        );
+        await ctx.reply(
+          `❌ <b>Invalid folder name!</b>\n\n` +
+            `A folder name cannot contain slashes or special characters, and cannot be "." or "..".\n\n` +
+            `Please try again, or click <b>Cancel</b>:`,
+          { parse_mode: "HTML", reply_markup: cancelKb },
+        );
+        return;
+      }
+
+      pendingFolderName.set(chatId, folderName);
+
+      const confirmText =
+        `<b>❓ Confirm Directory Creation</b>\n\n` +
+        `Do you want to create a new folder named <code>${folderName}</code> inside:\n<code>${parentPath}</code>?\n\n` +
+        `Please click <b>Confirm</b> to create, <b>Don't Confirm</b> to enter a different name, or <b>Cancel</b> to abort.`;
+
+      const confirmKb = new InlineKeyboard()
+        .text("✅ Confirm", "wd:mkdir:yes")
+        .text("❌ Don't Confirm", "wd:mkdir:no")
+        .row()
+        .text("🔙 Cancel", "wd:mkdir:cancel");
+
+      await ctx.reply(confirmText, {
+        parse_mode: "HTML",
+        reply_markup: confirmKb,
+      });
       return;
     }
 
@@ -529,7 +848,236 @@ export function createBot(config: Config) {
       }
     }
 
-    await runMimoCommand(ctx, text, { placeholder: "...", logPrefix: "chat" });
+    await runMimoCommand(ctx, text, { logPrefix: "chat" });
+  });
+
+  // ── callback_query handler ────────────────────────────
+  bot.on("callback_query:data", async (ctx) => {
+    if (!checkAuth(ctx, config)) {
+      await ctx.answerCallbackQuery({
+        text: "Access denied.",
+        show_alert: true,
+      });
+      return;
+    }
+
+    const chatId = String(ctx.chat?.id);
+    const data = ctx.callbackQuery.data;
+
+    if (data.startsWith("wd:")) {
+      const parts = data.split(":");
+      const action = parts[1];
+      const current = browsingPaths.get(chatId) ?? mimo.getWorkDir();
+
+      if (action === "close") {
+        await ctx.answerCallbackQuery();
+        browsingPaths.delete(chatId);
+        browsingSubdirs.delete(chatId);
+        try {
+          await ctx.deleteMessage();
+        } catch {
+          await ctx.editMessageText("<i>Explorer closed.</i>", {
+            parse_mode: "HTML",
+          });
+        }
+        return;
+      }
+
+      if (action === "newfolder") {
+        await ctx.answerCallbackQuery();
+        waitingForFolderName.set(chatId, {
+          parentPath: current,
+          ts: Date.now(),
+        });
+        pendingFolderName.delete(chatId);
+
+        const promptText =
+          `<b>📝 Create New Folder Here</b>\n\n` +
+          `Parent Path:\n<code>${current}</code>\n\n` +
+          `Please reply with a valid folder name (e.g., <code>my-project</code>).`;
+
+        const cancelKb = new InlineKeyboard().text(
+          "🔙 Cancel",
+          "wd:mkdir:cancel",
+        );
+        try {
+          await ctx.editMessageText(promptText, {
+            parse_mode: "HTML",
+            reply_markup: cancelKb,
+          });
+        } catch {
+          await ctx.reply(promptText, {
+            parse_mode: "HTML",
+            reply_markup: cancelKb,
+          });
+        }
+        return;
+      }
+
+      if (action === "mkdir") {
+        const arg = parts[2];
+        const waitEntry = waitingForFolderName.get(chatId);
+        const parentPath = waitEntry?.parentPath;
+        const folderName = pendingFolderName.get(chatId);
+
+        if (arg === "cancel") {
+          await ctx.answerCallbackQuery();
+          waitingForFolderName.delete(chatId);
+          pendingFolderName.delete(chatId);
+          await renderExplorer(ctx, chatId, true);
+          return;
+        }
+
+        if (arg === "no") {
+          await ctx.answerCallbackQuery();
+          pendingFolderName.delete(chatId);
+          // Re-prompt folder name input
+          const promptText =
+            `<b>📝 Create New Folder Here</b>\n\n` +
+            `Parent Path:\n<code>${current}</code>\n\n` +
+            `Please reply with a valid folder name (e.g., <code>my-project</code>).`;
+
+          const cancelKb = new InlineKeyboard().text(
+            "🔙 Cancel",
+            "wd:mkdir:cancel",
+          );
+          try {
+            await ctx.editMessageText(promptText, {
+              parse_mode: "HTML",
+              reply_markup: cancelKb,
+            });
+          } catch {
+            await ctx.reply(promptText, {
+              parse_mode: "HTML",
+              reply_markup: cancelKb,
+            });
+          }
+          return;
+        }
+
+        if (arg === "yes") {
+          if (!parentPath || !folderName) {
+            await ctx.answerCallbackQuery({
+              text: "Session state missing.",
+              show_alert: true,
+            });
+            return;
+          }
+
+          const targetPath = path.resolve(parentPath, folderName);
+
+          try {
+            // F3: guard mkdir target inside workspace root BEFORE writing
+            if (!isInsideRoot(targetPath, config.workdirRoot)) {
+              await ctx.answerCallbackQuery({
+                text: "Cannot create a folder outside the workspace root.",
+                show_alert: true,
+              });
+              waitingForFolderName.delete(chatId);
+              pendingFolderName.delete(chatId);
+              await renderExplorer(ctx, chatId, true);
+              return;
+            }
+
+            // F3: re-validate at write time
+            if (folderName === "." || folderName === "..") {
+              await ctx.answerCallbackQuery({
+                text: "Invalid folder name.",
+                show_alert: true,
+              });
+              return;
+            }
+
+            fs.mkdirSync(targetPath, { recursive: true });
+            await ctx.answerCallbackQuery({
+              text: `Folder created: ${folderName}`,
+            });
+
+            waitingForFolderName.delete(chatId);
+            pendingFolderName.delete(chatId);
+
+            // Update active browsing path to the newly created folder
+            const nextNav = isInsideRoot(targetPath, config.workdirRoot)
+              ? targetPath
+              : config.workdirRoot;
+            browsingPaths.set(chatId, nextNav);
+            await renderExplorer(ctx, chatId, true);
+          } catch (err) {
+            await ctx.answerCallbackQuery({
+              text: `Failed to create folder: ${(err as Error).message}`,
+              show_alert: true,
+            });
+          }
+          return;
+        }
+      }
+
+      if (action === "sel") {
+        await ctx.answerCallbackQuery();
+        // F2: guard setWorkDir to stay inside workspace root
+        if (!isInsideRoot(current, config.workdirRoot)) {
+          await ctx.answerCallbackQuery({
+            text: "Cannot select a directory outside the workspace root.",
+            show_alert: true,
+          });
+          return;
+        }
+        mimo.setWorkDir(current);
+        browsingPaths.delete(chatId);
+        browsingSubdirs.delete(chatId);
+
+        const text = `✅ <b>Working directory updated to:</b>\n<code>${current}</code>`;
+        try {
+          await ctx.editMessageText(text, { parse_mode: "HTML" });
+        } catch {
+          await ctx.reply(text, { parse_mode: "HTML" });
+        }
+        return;
+      }
+
+      if (action === "nav") {
+        const arg = parts[2];
+        let nextPath = current;
+        if (arg === "up") {
+          nextPath = path.resolve(current, "..");
+        } else {
+          const index = Number.parseInt(arg, 10);
+          const subdirs = browsingSubdirs.get(chatId) ?? [];
+          const folder = subdirs[index];
+          if (folder) {
+            nextPath = path.resolve(current, folder);
+          } else {
+            await ctx.answerCallbackQuery({
+              text: "Folder not found.",
+              show_alert: true,
+            });
+            return;
+          }
+        }
+
+        // F1: boundary check BEFORE filesystem access
+        if (!isInsideRoot(nextPath, config.workdirRoot)) {
+          await ctx.answerCallbackQuery({
+            text: "Navigation outside workspace is not allowed.",
+            show_alert: true,
+          });
+          return;
+        }
+
+        try {
+          fs.accessSync(nextPath, fs.constants.R_OK);
+          browsingPaths.set(chatId, nextPath);
+          await ctx.answerCallbackQuery();
+          await renderExplorer(ctx, chatId, true);
+        } catch (err) {
+          await ctx.answerCallbackQuery({
+            text: `Cannot access folder: ${(err as Error).message}`,
+            show_alert: true,
+          });
+        }
+        return;
+      }
+    }
   });
 
   bot.catch((err) => {

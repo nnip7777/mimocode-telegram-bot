@@ -11,13 +11,13 @@ export type SendMessageOpts = {
   agent?: string;
   thinking?: boolean;
   variant?: string;
+  onEvent?: (event: Record<string, unknown>) => void;
 };
 
 export class MimoClient {
-  private readonly workDir: string;
+  private workDir: string;
   private readonly mimoApiUrl?: string;
   private readonly skipPermissions: boolean;
-  private readonly runTimeoutMs: number;
   private sessions: Map<string, string> = new Map();
   private processes: Map<string, ChildProcess> = new Map();
   private chatModels: Map<string, string> = new Map();
@@ -28,7 +28,14 @@ export class MimoClient {
     this.workDir = config.mimoWorkDir;
     this.mimoApiUrl = config.mimoApiUrl;
     this.skipPermissions = config.skipPermissions;
-    this.runTimeoutMs = config.runTimeoutMs;
+  }
+
+  getWorkDir(): string {
+    return this.workDir;
+  }
+
+  setWorkDir(workDir: string): void {
+    this.workDir = workDir;
   }
 
   clearSession(chatId: string): void {
@@ -84,32 +91,23 @@ export class MimoClient {
     args: string[],
     chatId: string,
     onStdout: (chunk: Buffer) => void,
-    opts?: { timeoutMs?: number },
+    _onEvent?: (event: Record<string, unknown>) => void,
   ): Promise<{ stderr: string; code: number }> {
     return new Promise((resolve, reject) => {
       const proc = this.spawnProcess(args);
       this.processes.set(chatId, proc);
 
       let stderr = "";
-      const timeout = opts?.timeoutMs ?? this.runTimeoutMs;
-
-      const timer = setTimeout(() => {
-        proc.kill("SIGTERM");
-        this.processes.delete(chatId);
-        reject(new Error(`mimo timed out (${timeout}ms)`));
-      }, timeout);
 
       proc.stdout?.on("data", onStdout);
       proc.stderr?.on("data", (c: Buffer) => (stderr += c.toString()));
 
       proc.on("close", (code) => {
-        clearTimeout(timer);
         this.processes.delete(chatId);
         resolve({ stderr, code: code ?? -1 });
       });
 
       proc.on("error", (err) => {
-        clearTimeout(timer);
         this.processes.delete(chatId);
         reject(new Error(`Failed to spawn mimo: ${err.message}`));
       });
@@ -204,6 +202,7 @@ export class MimoClient {
           for (const line of lines) {
             try {
               const event = JSON.parse(line) as Record<string, unknown>;
+              if (opts?.onEvent) opts.onEvent(event);
               if (event.type === "text") {
                 const part = event.part as { text?: string } | undefined;
                 if (part?.text) {
@@ -221,7 +220,6 @@ export class MimoClient {
             }
           }
         },
-        { timeoutMs: this.runTimeoutMs },
       );
 
       if (code !== 0 && !fullContent) {

@@ -12,13 +12,32 @@ export function envBool(key: string, fallback: boolean): boolean {
   return raw === "true" || raw === "1";
 }
 
+export type Verbosity = "full" | "brief" | "hint" | "off";
+
+export function envVerbosity(key: string, fallback: Verbosity): Verbosity {
+  const raw = process.env[key];
+  if (!raw) return fallback;
+  const valid = ["full", "brief", "hint", "off"] as const;
+  if ((valid as readonly string[]).includes(raw)) return raw as Verbosity;
+  console.warn(
+    `${key}=${raw} is invalid; using ${fallback}. Valid: ${valid.join(", ")}`,
+  );
+  return fallback;
+}
+
 export type Config = {
   readonly telegramToken: string;
   readonly allowedUserIds: readonly string[];
   readonly mimoWorkDir: string;
+  readonly workdirRoot: string;
+  readonly workdirBrowseEnabled: boolean;
   readonly mimoApiUrl?: string;
   readonly skipPermissions: boolean;
-  readonly runTimeoutMs: number;
+  readonly showText: Verbosity;
+  readonly showReasoning: Verbosity;
+  readonly showToolUse: Verbosity;
+  readonly showStepStart: Verbosity;
+  readonly showStepFinish: Verbosity;
 };
 
 export function loadConfig(): Config {
@@ -34,21 +53,22 @@ export function loadConfig(): Config {
     );
   }
 
-  const runTimeoutMsRaw = process.env.MIMO_RUN_TIMEOUT_MS;
-  const runTimeoutMs = runTimeoutMsRaw ? Number(runTimeoutMsRaw) : 120_000;
-  if (Number.isNaN(runTimeoutMs) || runTimeoutMs <= 0) {
-    throw new Error(
-      "MIMO_RUN_TIMEOUT_MS must be a positive number (milliseconds)",
-    );
-  }
-
   return {
     telegramToken: env("TELEGRAM_BOT_TOKEN"),
     allowedUserIds,
     mimoWorkDir: env("MIMO_WORK_DIR", resolve(process.cwd())),
+    workdirRoot: resolve(
+      process.env.MIMO_WORKDIR_ROOT ||
+        env("MIMO_WORK_DIR", resolve(process.cwd())),
+    ),
+    workdirBrowseEnabled: envBool("MIMO_WORKDIR_BROWSE", false),
     mimoApiUrl: process.env.MIMO_API_URL || undefined,
     skipPermissions: envBool("MIMO_SKIP_PERMISSIONS", false),
-    runTimeoutMs,
+    showText: envVerbosity("MIMO_SHOW_TEXT", "full"),
+    showReasoning: envVerbosity("MIMO_SHOW_REASONING", "off"),
+    showToolUse: envVerbosity("MIMO_SHOW_TOOL_USE", "off"),
+    showStepStart: envVerbosity("MIMO_SHOW_STEP_START", "off"),
+    showStepFinish: envVerbosity("MIMO_SHOW_STEP_FINISH", "off"),
   };
 }
 

@@ -3,3 +3,9 @@ dist/
 .env
 *.log
 .claude/
+docs/plan/
+docs/compose/
+ecosystem.config.cjs
+start.sh
+work/
+.pm2/

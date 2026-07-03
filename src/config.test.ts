@@ -70,8 +70,14 @@ describe("isAllowed", () => {
     telegramToken: "test-token",
     allowedUserIds: ["111", "222"],
     mimoWorkDir: "/tmp",
+    workdirRoot: "/tmp",
+    workdirBrowseEnabled: false,
     skipPermissions: false,
-    runTimeoutMs: 120_000,
+    showText: "full",
+    showReasoning: "off",
+    showToolUse: "off",
+    showStepStart: "off",
+    showStepFinish: "off",
   };
 
   it("returns true for valid user ID", () => {

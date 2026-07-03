@@ -6,8 +6,14 @@ const baseConfig: Config = {
   telegramToken: "test-token",
   allowedUserIds: ["111"],
   mimoWorkDir: "/tmp",
+  workdirRoot: "/tmp",
+  workdirBrowseEnabled: false,
   skipPermissions: false,
-  runTimeoutMs: 120_000,
+  showText: "full",
+  showReasoning: "off",
+  showToolUse: "off",
+  showStepStart: "off",
+  showStepFinish: "off",
 };
 
 // ── session management ────────────────────────────────
@@ -72,5 +78,20 @@ describe("MimoClient.abort", () => {
   it("returns false when no process for chatId", () => {
     const client = new MimoClient(baseConfig);
     expect(client.abort("chat1")).toBe(false);
+  });
+});
+
+// ── workdir management ────────────────────────────────
+
+describe("MimoClient workdir management", () => {
+  it("getWorkDir returns initial config workDir", () => {
+    const client = new MimoClient(baseConfig);
+    expect(client.getWorkDir()).toBe("/tmp");
+  });
+
+  it("setWorkDir dynamically updates the workDir", () => {
+    const client = new MimoClient(baseConfig);
+    client.setWorkDir("/tmp/workdir-x");
+    expect(client.getWorkDir()).toBe("/tmp/workdir-x");
   });
 });
