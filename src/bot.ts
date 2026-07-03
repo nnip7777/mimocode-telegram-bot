@@ -208,10 +208,15 @@ export function createBot(config: Config) {
 
     // Keep the "typing…" indicator alive while mimo is working.
     // Telegram expires the status after ~5 seconds, so refresh every 4s.
+    const typingWarn = (e: unknown) =>
+      console.warn(
+        `[typing] chat=${chatId}:`,
+        e instanceof Error ? e.message : e,
+      );
     const typingInterval = setInterval(() => {
-      bot.api.sendChatAction(chatId, "typing").catch(() => {});
+      bot.api.sendChatAction(chatId, "typing").catch(typingWarn);
     }, 4000);
-    bot.api.sendChatAction(chatId, "typing").catch(() => {});
+    bot.api.sendChatAction(chatId, "typing").catch(typingWarn);
 
     try {
       const onEvent = (event: Record<string, unknown>) => {
