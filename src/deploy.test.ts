@@ -12,10 +12,10 @@
  *   - 路径脱敏验证
  */
 
+import { describe, expect, it } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "bun:test";
-import { isInsideRoot, sanitizeError, checkAuth } from "./bot.js";
+import { checkAuth, isInsideRoot, sanitizeError } from "./bot.js";
 import type { Config } from "./config.js";
 
 // ── 测试用临时目录 ──────────────────────────────────────────────
@@ -82,7 +82,9 @@ describe("deploy: isInsideRoot with real paths", () => {
   });
 
   it("trailing slash in root doesn't break check", () => {
-    expect(isInsideRoot(path.join(WORKSPACE, "src"), WORKSPACE + "/")).toBe(true);
+    expect(isInsideRoot(path.join(WORKSPACE, "src"), `${WORKSPACE}/`)).toBe(
+      true,
+    );
   });
 });
 
@@ -140,7 +142,9 @@ describe("deploy: F1 navigation guard", () => {
   });
 
   it("wd:nav to parent traversal is blocked", () => {
-    expect(isInsideRoot(path.resolve(WORKSPACE, "../etc/passwd"), WORKSPACE)).toBe(false);
+    expect(
+      isInsideRoot(path.resolve(WORKSPACE, "../etc/passwd"), WORKSPACE),
+    ).toBe(false);
   });
 
   it("wd:nav to subdirectory src is allowed", () => {
@@ -180,8 +184,18 @@ describe("deploy: F3 mkdir guard", () => {
   });
 
   it("write-time re-validation catches . and ..", () => {
-    expect("." === ".").toBe(true); // caught by name check at bot.ts:983
-    expect(".." === "..").toBe(true); // caught by name check at bot.ts:983
+    // Mirrors bot.ts:983 guard logic
+    const validName = (n: string) =>
+      n !== "" &&
+      n !== "." &&
+      n !== ".." &&
+      !path.isAbsolute(n) &&
+      !n.includes("..");
+    expect(validName(".")).toBe(false);
+    expect(validName("..")).toBe(false);
+    expect(validName("")).toBe(false);
+    expect(validName("/etc/passwd")).toBe(false);
+    expect(validName("normal-folder")).toBe(true);
   });
 });
 

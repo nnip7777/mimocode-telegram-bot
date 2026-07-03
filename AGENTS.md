@@ -1,57 +1,53 @@
 # Agent Instructions: mimocode-telegram-bot
 
-This file contains high-signal project-specific context, critical toolchain quirks, and verification commands to help future AI agent sessions ramp up quickly and avoid common mistakes.
+## Critical Gotchas
 
-## Critical Gotchas & Environment Quirks
+* **Bun sub-shell PATH:** Commands spawned by `bun run` do not inherit `~/.bun/bin` in PATH. Any script that calls `bun` internally fails with "bun: command not found".
+  * **Affected:** `bun run test`, `bun run typecheck` (they spawn `bun` subprocesses).
+  * **Safe:** `bun run lint`, `bun run lint:fix`, `bun run format` (call `biome` directly, no PATH workaround needed).
+  * **Fix:** `export PATH="$HOME/.bun/bin:$PATH"` before affected commands.
 
-* **Bun PATH Resolution Issue:** The system shell environments spawned by `bun run` do not have `bun` globally in their `PATH` by default. Invoking commands like `bun run typecheck` or `bun run lint` will fail with a "bun: command not found" error.
-  * **Solution:** Always prepend `export PATH="$HOME/.bun/bin:$PATH"` before executing any `bun` commands, or invoke the local Bun executable directly using `~/.bun/bin/bun`.
-* **Required Environment Variables:** The bot cannot boot without a valid `.env` file containing:
-  * `TELEGRAM_BOT_TOKEN`
-  * `TELEGRAM_ALLOWED_USER_ID` (comma-separated whitelisted user IDs; refusing to start if empty to prevent security bypasses).
+* **Required env vars (bot refuses to start without them):**
+  * `TELEGRAM_BOT_TOKEN` — from @BotFather.
+  * `TELEGRAM_ALLOWED_USER_ID` — comma-separated numeric Telegram user IDs. Empty value is rejected at startup (security: prevents open proxy).
+  * `MIMO_SKIP_PERMISSIONS` — defaults `false`; `true` or `1` disables all agent permission prompts. Dangerous on shared hosts.
 
-## Development Commands
+* **Workspace root:** `MIMO_WORKDIR_ROOT` (defaults to `MIMO_WORK_DIR` or cwd) is the hard boundary for `/workdir` navigation and folder creation. All filesystem paths must stay inside it.
 
-All commands should have the Bun PATH prepended:
+## Commands
 
 ```bash
-# Prep environment PATH for Bun
+# Needed for commands that invoke `bun` internally:
 export PATH="$HOME/.bun/bin:$PATH"
 
-# Run all unit tests
-bun test
-
-# Run a specific unit test file
-bun test src/mimo.test.ts
-
-# Run integration tests (Requires a live, working mimo CLI)
-bun tests/integration.ts
-
-# Run linter and formatter (Biome is used in this project)
-npx @biomejs/biome check src/         # Check formatting and lint rules
-npx @biomejs/biome check --write src/ # Auto-fix safe issues
-npx @biomejs/biome format --write src/
-
-# Run TypeScript typechecking
-bun run typecheck
-
-# Build the production bundle
-bun run build
+bun test                        # all unit tests
+bun test src/mimo.test.ts       # single file
+bun run lint                    # biome check src/
+bun run lint:fix                # auto-fix safe issues
+bun run format                  # biome format write
+export PATH="$HOME/.bun/bin:$PATH" && bun run typecheck
+export PATH="$HOME/.bun/bin:$PATH" && bun run build
+bun run dev                     # watch mode
 ```
 
-## Required Verification Order
+## Verification Order
 
-Before claiming any task is complete, fixed, or passing, always execute this verification pipeline in order and ensure all checks pass:
+Run in order, all must pass:
 
-1. **Lint/Format:** `npx @biomejs/biome check src/`
-2. **Typecheck:** `export PATH="$HOME/.bun/bin:$PATH" && bun run typecheck`
-3. **Tests:** `export PATH="$HOME/.bun/bin:$PATH" && bun test`
+1. `bun run lint`
+2. `export PATH="$HOME/.bun/bin:$PATH" && bun run typecheck`
+3. `export PATH="$HOME/.bun/bin:$PATH" && bun test`
 
-## Architecture & Code Boundaries
+> Biome config also covers `tests/`. The `bun run lint` script only checks `src/` — run `npx @biomejs/biome check tests/` separately if test files changed.
 
-* **Single-Package App:** This is a lightweight, single-package TypeScript application.
-* **Process Model:** The bot integrates with the `mimo` CLI via `spawn("mimo", ...)` processes. It streams and parses the JSON event stream from `stdout` in real-time.
-* **In-Memory State:** All session, model, agent, and active process associations are maintained entirely in-memory using `Map`s inside `src/bot.ts`. There is no persistent database.
-* **Resources:**
-  * For architecture details, PM2 daemon configuration, command references, and flow diagrams, read `docs/USAGE.md`.
-  * For historical features and design specifications of past tasks, check the files under `plans/`.
+## Integration Tests
+
+`bun tests/integration.ts` requires a live `mimo` CLI (`npm i -g @mimo-ai/cli`). Skips cleanly if not installed.
+
+## Architecture
+
+* Single ESM package, entry point `src/index.ts`. No monorepo.
+* Bot spawns `mimo` CLI via `child_process.spawn`, streams JSON events from stdout. All state (sessions, models, agents, running processes) is in-memory `Map`s — no database.
+* `dist/` is gitignored. Build before publishing: `bun run build`.
+* `work/` is gitignored scratch space.
+* `docs/USAGE.md` has PM2 config, command reference, and flow diagrams. `plans/` has historical design specs.

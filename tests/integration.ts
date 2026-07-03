@@ -8,7 +8,7 @@ import { MimoClient, type SendMessageOpts } from "../src/mimo.js";
 const config: Config = {
   telegramToken: "test-token",
   allowedUserIds: ["6985614590"],
-  mimoWorkDir: "/Users/moran/project/mimocode-telegram-bot",
+  mimoWorkDir: "/tmp/mimocode-test",
   mimoApiUrl: process.env.MIMO_API_URL,
   skipPermissions: false,
   showText: "full",
@@ -167,8 +167,8 @@ await check("checkAuth: disallowed user", () => {
 
 // ── sanitizeError (in-process) ──
 await check("sanitizeError: masks local paths", () => {
-  const out = sanitizeError("failed at /Users/moran/secret/file.ts");
-  if (out.includes("/Users/moran")) throw new Error("path leaked");
+  const out = sanitizeError("failed at /tmp/mimocode-test/secret/file.ts");
+  if (out.includes("/tmp/mimocode-test")) throw new Error("path leaked");
   if (!out.includes("<path>")) throw new Error("not masked");
 });
 

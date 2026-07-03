@@ -91,7 +91,7 @@ describe("MimoClient workdir management", () => {
 
   it("setWorkDir dynamically updates the workDir", () => {
     const client = new MimoClient(baseConfig);
-    client.setWorkDir("/home/pluto");
-    expect(client.getWorkDir()).toBe("/home/pluto");
+    client.setWorkDir("/tmp/workdir-x");
+    expect(client.getWorkDir()).toBe("/tmp/workdir-x");
   });
 });
