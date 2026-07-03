@@ -59,6 +59,7 @@ const cmdResult = await bot.api.setMyCommands([
   { command: "export", description: "Export current session" },
   { command: "providers", description: "List AI providers" },
   { command: "delete", description: "Delete a session" },
+  { command: "history", description: "Search chat history" },
   { command: "version", description: "MimoCode version" },
 ]);
 console.log(`  Commands registered: ${cmdResult ? "OK" : "FAILED"}`);

@@ -9,6 +9,7 @@ import {
   stripSystemTags,
   wrapCode,
 } from "./format.js";
+import { ChatHistory } from "./history.js";
 import { MimoClient, type SendMessageOpts } from "./mimo.js";
 
 export function checkAuth(
@@ -182,6 +183,9 @@ export function createBot(config: Config) {
   const waitingForFolderName = new Map<string, WaitEntry>();
   const pendingFolderName = new Map<string, string>();
 
+  const historyPath = join(config.mimoWorkDir, ".tg-bot", "chat-history.db");
+  const history = new ChatHistory(historyPath);
+
   async function sendLong(chatId: string, text: string) {
     const chunks = formatLong(text);
     for (const chunk of chunks) {
@@ -223,6 +227,7 @@ export function createBot(config: Config) {
 
   async function runMimoCommand(ctx: Context, text: string, opts: MimoRunOpts) {
     const chatId = String(ctx.chat?.id);
+    const userId = String(ctx.from?.id ?? "unknown");
     if (processing.has(chatId)) {
       await ctx.reply("Task running. Wait or /cancel.");
       return;
@@ -277,7 +282,13 @@ export function createBot(config: Config) {
         ...opts.mimoOpts,
         onEvent,
       };
+
+      history.addMessage(chatId, userId, "user", text);
       const result = await mimo.sendMessage(chatId, text, mergedOpts);
+
+      if (result.content) {
+        history.addMessage(chatId, userId, "assistant", result.content);
+      }
 
       if (!result.content || config.showText === "off") {
         return;
@@ -777,6 +788,60 @@ export function createBot(config: Config) {
     }
   });
 
+  // ── /history — search chat history ────────────────────
+  bot.command("history", async (ctx) => {
+    if (!checkAuth(ctx, config)) return;
+    const chatId = String(ctx.chat.id);
+    const query = ctx.match?.trim();
+
+    if (!query) {
+      const stats = history.getStats(chatId);
+      const recent = history.getRecent(chatId, 5);
+      const lines = [
+        `<b>Chat History</b>`,
+        `Messages: ${stats.total}`,
+        stats.first
+          ? `Since: ${new Date(stats.first).toLocaleDateString("ru")}`
+          : "",
+        ``,
+        `<b>Last 5 messages:</b>`,
+      ];
+      for (const msg of recent) {
+        const role = msg.role === "user" ? "👤" : "🤖";
+        const time = new Date(msg.timestamp).toLocaleTimeString("ru", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        const preview = msg.text.slice(0, 100).replace(/\n/g, " ");
+        lines.push(`${role} [${time}] ${preview}`);
+      }
+      lines.push(``, `Usage: /history &lt;search query&gt;`);
+      await ctx.reply(lines.join("\n"), { parse_mode: "HTML" });
+      return;
+    }
+
+    const results = history.search(chatId, query, 10);
+    if (results.length === 0) {
+      await ctx.reply(`No results for "${query}".`);
+      return;
+    }
+
+    const lines = [`<b>Search: "${query}"</b> (${results.length} results)\n`];
+    for (const msg of results) {
+      const role = msg.role === "user" ? "👤" : "🤖";
+      const time = new Date(msg.timestamp).toLocaleString("ru", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const preview = msg.text.slice(0, 200).replace(/\n/g, " ");
+      lines.push(`${role} [${time}]`);
+      lines.push(`${preview}\n`);
+    }
+    await sendLong(chatId, lines.join("\n"));
+  });
+
   // ── /cancel, /stop ──────────────────────────────────
   bot.command(["cancel", "stop"], async (ctx) => {
     if (!checkAuth(ctx, config)) return;
@@ -889,6 +954,11 @@ export function createBot(config: Config) {
         imagePath: filepath,
       });
 
+      history.addMessage(chatId, userId, "user", `[Photo: ${filepath}] ${prompt}`);
+      if (result.content) {
+        history.addMessage(chatId, userId, "assistant", result.content);
+      }
+
       if (!result.content) {
         await bot.api
           .editMessageText(chatId, sent.message_id, "(empty)")
@@ -990,6 +1060,11 @@ export function createBot(config: Config) {
       const response = await mimo.sendMessage(chatId, prompt, {
         imagePath: result.filepath,
       });
+
+      history.addMessage(chatId, userId, "user", `[Document: ${result.filepath}] ${prompt}`);
+      if (response.content) {
+        history.addMessage(chatId, userId, "assistant", response.content);
+      }
 
       if (!response.content) {
         await bot.api
