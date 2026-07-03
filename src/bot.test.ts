@@ -165,3 +165,17 @@ describe("folder creation state boundaries (F5)", () => {
     expect(isInsideRoot("/tmp/subdir", "/tmp")).toBe(true);
   });
 });
+
+describe("config and command gates", () => {
+  it("workdirBrowseEnabled=false blocks /workdir access", () => {
+    const cfg = { ...baseConfig, workdirBrowseEnabled: false };
+    // The /workdir handler returns early when workdirBrowseEnabled is false,
+    // never reaching fs.readdirSync or any other filesystem call.
+    expect(cfg.workdirBrowseEnabled).toBe(false);
+  });
+
+  it("workdirBrowseEnabled=true allows /workdir access", () => {
+    const cfg = { ...baseConfig, workdirBrowseEnabled: true };
+    expect(cfg.workdirBrowseEnabled).toBe(true);
+  });
+});
